@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.HeadsetOff
+import androidx.compose.material.icons.rounded.Info
 import androidx.core.content.ContextCompat
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -162,6 +165,8 @@ fun AurynkReceiverApp(
     // --- STATE ---
     var isServiceRunning by remember { mutableStateOf(true) } // Service auto-starts on app launch
     var volume by remember { mutableFloatStateOf(0.8f) }
+    var isMuted by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
 
     // Dynamic colors based on connection state
     val statusColor by animateColorAsState(
@@ -173,6 +178,15 @@ fun AurynkReceiverApp(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Aurynk Receiver", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { showAboutDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = "About",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.onBackground
@@ -198,19 +212,33 @@ fun AurynkReceiverApp(
                     modifier = Modifier
                         .size(100.dp)
                         .clip(CircleShape)
-                        .background(statusColor.copy(alpha = 0.15f)),
+                        .background(statusColor.copy(alpha = 0.15f))
+                        .then(
+                            if (isClientConnected) Modifier.clickable {
+                                isMuted = !isMuted
+                                val muteIntent = Intent(context, AudioRelayService::class.java).apply {
+                                    action = AudioRelayService.ACTION_SET_VOLUME
+                                    putExtra(AudioRelayService.EXTRA_VOLUME, if (isMuted) 0f else volume)
+                                }
+                                context.startService(muteIntent)
+                            } else Modifier
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = if (isClientConnected) Icons.Rounded.Headphones else Icons.Rounded.LinkOff,
-                        contentDescription = "Status",
+                        imageVector = if (!isClientConnected) Icons.Rounded.LinkOff 
+                                     else if (isMuted) Icons.Rounded.HeadsetOff 
+                                     else Icons.Rounded.Headphones,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
                         modifier = Modifier.size(56.dp),
                         tint = statusColor
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(
-                    text = if (isClientConnected) "Streaming Audio" else if (isServiceRunning) "Waiting for Connection" else "Service Stopped",
+                    text = if (isClientConnected) {
+                        if (isMuted) "Muted" else "Streaming Audio"
+                    } else if (isServiceRunning) "Waiting for Connection" else "Service Stopped",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onBackground
@@ -250,6 +278,7 @@ fun AurynkReceiverApp(
                             value = volume,
                             onValueChange = { newVolume ->
                                 volume = newVolume
+                                isMuted = false // Unmute when user adjusts volume
                                 // Send volume change to service
                                 val volumeIntent = Intent(context, AudioRelayService::class.java).apply {
                                     action = AudioRelayService.ACTION_SET_VOLUME
@@ -380,6 +409,81 @@ fun AurynkReceiverApp(
                 )
             }
         }
+    }
+    
+    // About Dialog
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = {
+                Text(
+                    text = "About Aurynk Receiver",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Version 1.0.0",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "Stream audio from your PC to your Android device over a secure TLS connection.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "Developer",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Ashutosh Singh",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        text = "GitHub",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "github.com/IshuSinghSE/AudioRelay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "© 2025 Ishu Singh. All rights reserved.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 
