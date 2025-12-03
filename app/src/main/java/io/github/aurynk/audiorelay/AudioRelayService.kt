@@ -111,6 +111,8 @@ class AudioRelayService : Service() {
                             while (`in`.read(buffer).also { read = it } != -1 && isServerRunning) {
                                 audioTrack?.write(buffer, 0, read)
                             }
+                            audioTrack?.stop()
+                            audioTrack?.flush()
                         }
                         Log.i("AudioRelay", "Client disconnected.")
                     }
