@@ -44,15 +44,26 @@ import androidx.compose.runtime.setValue
 class MainActivity : ComponentActivity() {
     private var connectionState by mutableStateOf(false)
     private var clientIpState by mutableStateOf("")
+    private var audioLevels by mutableStateOf(FloatArray(24) { 0f })
     
     private val connectionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: AndroidIntent?) {
             intent ?: return
-            val connected = intent.getBooleanExtra("connected", false)
-            val ip = intent.getStringExtra("client_ip") ?: ""
-            Log.d("MainActivity", "Broadcast received: connected=$connected, ip=$ip")
-            connectionState = connected
-            clientIpState = ip
+            when (intent.action) {
+                "io.github.aurynk.CLIENT_CONNECTION" -> {
+                    val connected = intent.getBooleanExtra("connected", false)
+                    val ip = intent.getStringExtra("client_ip") ?: ""
+                    Log.d("MainActivity", "Broadcast received: connected=$connected, ip=$ip")
+                    connectionState = connected
+                    clientIpState = ip
+                }
+                AudioRelayService.ACTION_AUDIO_LEVEL -> {
+                    val levels = intent.getFloatArrayExtra(AudioRelayService.EXTRA_AUDIO_LEVELS)
+                    if (levels != null && levels.size == 24) {
+                        audioLevels = levels
+                    }
+                }
+            }
         }
     }
     
@@ -64,7 +75,10 @@ class MainActivity : ComponentActivity() {
         ContextCompat.startForegroundService(this, intent)
         
         // Register broadcast receiver with proper flags for all Android versions
-        val filter = IntentFilter("io.github.aurynk.CLIENT_CONNECTION")
+        val filter = IntentFilter().apply {
+            addAction("io.github.aurynk.CLIENT_CONNECTION")
+            addAction(AudioRelayService.ACTION_AUDIO_LEVEL)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(connectionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -83,7 +97,8 @@ class MainActivity : ComponentActivity() {
                     AurynkReceiverApp(
                         context = this,
                         isClientConnected = connectionState,
-                        clientIp = clientIpState
+                        clientIp = clientIpState,
+                        audioLevels = audioLevels
                     )
                 }
             }
@@ -138,7 +153,8 @@ fun getDeviceIpAddress(context: Context): String {
 fun AurynkReceiverApp(
     context: Context,
     isClientConnected: Boolean,
-    clientIp: String
+    clientIp: String,
+    audioLevels: FloatArray = FloatArray(24) { 0f }
 ) {
     val deviceIp = remember { getDeviceIpAddress(context) }
     val port = "5000" // Fixed port matching the service
@@ -220,8 +236,8 @@ fun AurynkReceiverApp(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Mock Audio Visualizer
-                        FakeAudioVisualizer()
+                        // Real Audio Visualizer
+                        RealAudioVisualizer(audioLevels = audioLevels)
                         Spacer(Modifier.height(32.dp))
                         // Volume Slider
                         Text(
@@ -232,7 +248,15 @@ fun AurynkReceiverApp(
                         Spacer(Modifier.height(8.dp))
                         Slider(
                             value = volume,
-                            onValueChange = { volume = it },
+                            onValueChange = { newVolume ->
+                                volume = newVolume
+                                // Send volume change to service
+                                val volumeIntent = Intent(context, AudioRelayService::class.java).apply {
+                                    action = AudioRelayService.ACTION_SET_VOLUME
+                                    putExtra(AudioRelayService.EXTRA_VOLUME, newVolume)
+                                }
+                                context.startService(volumeIntent)
+                            },
                             modifier = Modifier.fillMaxWidth(0.85f)
                         )
                     }
@@ -359,7 +383,75 @@ fun AurynkReceiverApp(
     }
 }
 
-// A fake visualizer component just for the mockup look
+// A real visualizer component that responds to actual audio data
+@Composable
+fun RealAudioVisualizer(audioLevels: FloatArray) {
+    val brush = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.primary,
+            MaterialTheme.colorScheme.tertiary
+        )
+    )
+    
+    // Use spring animation with low bounce for smooth, gradual movement
+    val animatedLevels = audioLevels.map { level ->
+        animateFloatAsState(
+            targetValue = level,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessLow
+            ),
+            label = "audioLevel"
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        animatedLevels.forEachIndexed { index, animatedLevel ->
+            val barHeight = 10f + (animatedLevel.value * 60f) // Min 10dp, max 70dp per side
+            
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.height(140.dp)
+            ) {
+                // Top bar (grows upward)
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(barHeight.dp)
+                        .clip(RoundedCornerShape(bottomStart = 1.5.dp, bottomEnd = 1.5.dp))
+                        .background(brush)
+                )
+                
+                // Center dot
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+                
+                // Bottom bar (grows downward)
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(barHeight.dp)
+                        .clip(RoundedCornerShape(topStart = 1.5.dp, topEnd = 1.5.dp))
+                        .background(brush)
+                )
+            }
+        }
+    }
+}
+
+// A fake visualizer component just for the mockup look (kept for preview)
 @Composable
 fun FakeAudioVisualizer() {
     val infiniteTransition = rememberInfiniteTransition(label = "visualizer")
@@ -411,7 +503,8 @@ fun PreviewAurynkApp() {
         AurynkReceiverApp(
             context = androidx.compose.ui.platform.LocalContext.current,
             isClientConnected = false,
-            clientIp = ""
+            clientIp = "",
+            audioLevels = FloatArray(24) { 0.5f }
         )
     }
 }

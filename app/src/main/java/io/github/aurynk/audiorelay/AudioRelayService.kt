@@ -33,6 +33,13 @@ class AudioRelayService : Service() {
     private var serverSocket: ServerSocket? = null
     private var useTls: Boolean = true // Default to TLS for production
     private var audioTrack: AudioTrack? = null
+    
+    companion object {
+        const val ACTION_SET_VOLUME = "io.github.aurynk.SET_VOLUME"
+        const val EXTRA_VOLUME = "volume"
+        const val ACTION_AUDIO_LEVEL = "io.github.aurynk.AUDIO_LEVEL"
+        const val EXTRA_AUDIO_LEVELS = "audio_levels"
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -44,13 +51,25 @@ class AudioRelayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        isServerRunning = true
-        // Check for intent extra to override TLS (for dev/advanced users)
-        useTls = intent?.getBooleanExtra("useTls", true) ?: true
-        serverThread = Thread { startAudioServer() }
-        serverThread?.start()
-        Log.i("AudioRelay", "Service onStartCommand: useTls=$useTls, server thread started.")
-        return START_STICKY
+        when (intent?.action) {
+            ACTION_SET_VOLUME -> {
+                val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
+                setVolume(volume)
+                Log.d("AudioRelay", "Volume set to: $volume")
+                return START_STICKY
+            }
+            else -> {
+                isServerRunning = true
+                // Check for intent extra to override TLS (for dev/advanced users)
+                useTls = intent?.getBooleanExtra("useTls", true) ?: true
+                if (serverThread == null || !serverThread!!.isAlive) {
+                    serverThread = Thread { startAudioServer() }
+                    serverThread?.start()
+                    Log.i("AudioRelay", "Service onStartCommand: useTls=$useTls, server thread started.")
+                }
+                return START_STICKY
+            }
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -159,8 +178,15 @@ class AudioRelayService : Service() {
                         client.getInputStream().use { `in` ->
                             val buffer = ByteArray(minBufSize)
                             var read: Int
+                            var frameCount = 0
                             while (`in`.read(buffer).also { read = it } != -1 && isServerRunning) {
                                 audioTrack?.write(buffer, 0, read)
+                                
+                                // Broadcast audio levels periodically (every 5 frames ~= 11ms for smoother updates)
+                                if (++frameCount % 5 == 0) {
+                                    val levels = calculateAudioLevels(buffer, read)
+                                    broadcastAudioLevels(levels)
+                                }
                             }
                             audioTrack?.stop()
                             audioTrack?.flush()
@@ -197,6 +223,54 @@ class AudioRelayService : Service() {
             } catch (e: IOException) {
                 Log.e("AudioRelay", "Error closing server socket during cleanup.", e)
             }
+        }
+    }
+
+    private fun setVolume(volume: Float) {
+        try {
+            // Clamp volume between 0.0 and 1.0
+            val clampedVolume = volume.coerceIn(0f, 1f)
+            audioTrack?.setVolume(clampedVolume)
+            Log.d("AudioRelay", "AudioTrack volume updated to: $clampedVolume")
+        } catch (e: Exception) {
+            Log.e("AudioRelay", "Error setting volume: ${e.message}", e)
+        }
+    }
+    
+    private fun calculateAudioLevels(buffer: ByteArray, size: Int): FloatArray {
+        // Calculate 24 frequency bands by sampling the PCM data
+        val bands = 24
+        val levels = FloatArray(bands)
+        val samplesPerBand = size / (bands * 2) // 2 bytes per sample (16-bit PCM)
+        
+        for (i in 0 until bands) {
+            var sum = 0f
+            val start = i * samplesPerBand * 2
+            val end = minOf(start + samplesPerBand * 2, size)
+            
+            for (j in start until end step 2) {
+                if (j + 1 < size) {
+                    // Convert two bytes to 16-bit sample
+                    val sample = (buffer[j].toInt() and 0xFF) or ((buffer[j + 1].toInt() and 0xFF) shl 8)
+                    val normalized = sample.toShort().toFloat() / 32768f
+                    sum += kotlin.math.abs(normalized)
+                }
+            }
+            
+            levels[i] = (sum / samplesPerBand).coerceIn(0f, 1f)
+        }
+        
+        return levels
+    }
+    
+    private fun broadcastAudioLevels(levels: FloatArray) {
+        try {
+            val intent = Intent(ACTION_AUDIO_LEVEL)
+            intent.setPackage(packageName)
+            intent.putExtra(EXTRA_AUDIO_LEVELS, levels)
+            sendBroadcast(intent)
+        } catch (e: Exception) {
+            // Silently ignore broadcast errors to avoid spam
         }
     }
 
