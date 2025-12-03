@@ -99,15 +99,21 @@ class AudioRelayService : Service() {
                 val keyStore = KeyStore.getInstance("PKCS12")
                 keyStore.load(keystoreStream, keystorePassword.toCharArray())
 
-                val kmf = KeyManagerFactory.getInstance("X509")
+                // Use the platform default KeyManagerFactory algorithm (more portable)
+                val kmfAlg = KeyManagerFactory.getDefaultAlgorithm()
+                val kmf = KeyManagerFactory.getInstance(kmfAlg)
                 kmf.init(keyStore, keystorePassword.toCharArray())
+
+                Log.i("AudioRelay", "Loaded keystore and initialized KeyManagerFactory (alg=$kmfAlg)")
 
                 val sslContext = SSLContext.getInstance("TLS")
                 sslContext.init(kmf.keyManagers, null, null)
                 val sslServerSocketFactory = sslContext.serverSocketFactory as SSLServerSocketFactory
+
+                // Create server socket; this binds to the default wildcard address (0.0.0.0)
                 serverSocket = sslServerSocketFactory.createServerSocket(port) as SSLServerSocket
                 (serverSocket as SSLServerSocket).needClientAuth = false
-                Log.i("AudioRelay", "TLS enabled. Listening on port $port")
+                Log.i("AudioRelay", "TLS enabled. Listening on port ${serverSocket?.localPort} bound to ${serverSocket?.inetAddress}")
             } else {
                 // --- Plain TCP ---
                 serverSocket = ServerSocket(port)
@@ -139,6 +145,17 @@ class AudioRelayService : Service() {
                 try {
                     serverSocket?.accept()?.use { client ->
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
+                        // Broadcast connection event so UI can update
+                        try {
+                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            bcast.setPackage(packageName) // Make it explicit to this app
+                            bcast.putExtra("connected", true)
+                            bcast.putExtra("client_ip", client.inetAddress.hostAddress)
+                            sendBroadcast(bcast)
+                            Log.i("AudioRelay", "Broadcast sent: CLIENT_CONNECTION connected=true ip=${client.inetAddress.hostAddress}")
+                        } catch (ex: Exception) {
+                            Log.e("AudioRelay", "Failed to broadcast client connected: ${ex.message}", ex)
+                        }
                         client.getInputStream().use { `in` ->
                             val buffer = ByteArray(minBufSize)
                             var read: Int
@@ -149,6 +166,17 @@ class AudioRelayService : Service() {
                             audioTrack?.flush()
                         }
                         Log.i("AudioRelay", "Client disconnected.")
+                        // Broadcast disconnect event so UI can update
+                        try {
+                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            bcast.setPackage(packageName) // Make it explicit to this app
+                            bcast.putExtra("connected", false)
+                            bcast.putExtra("client_ip", "")
+                            sendBroadcast(bcast)
+                            Log.i("AudioRelay", "Broadcast sent: CLIENT_CONNECTION connected=false")
+                        } catch (ex: Exception) {
+                            Log.e("AudioRelay", "Failed to broadcast client disconnected: ${ex.message}", ex)
+                        }
                     }
                 } catch (e: IOException) {
                     if (isServerRunning) {
