@@ -18,52 +18,64 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.io.IOException
 import java.net.ServerSocket
+import java.security.KeyStore
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLServerSocket
+import javax.net.ssl.SSLServerSocketFactory
 
 class AudioRelayService : Service() {
     private lateinit var mediaSession: MediaSessionCompat
     private lateinit var notificationManager: NotificationManagerCompat
     private var serverThread: Thread? = null
 
-    @Volatile
-    private var isServerRunning = true
+    @Volatile private var isServerRunning = true
     private var serverSocket: ServerSocket? = null
+    private var useTls: Boolean = true // Default to TLS for production
     private var audioTrack: AudioTrack? = null
 
     override fun onCreate() {
         super.onCreate()
         mediaSession = MediaSessionCompat(this, "AudioRelay")
         notificationManager = NotificationManagerCompat.from(this)
-
-        // Before starting foreground, you need to create a notification channel (for Android 8.0+)
-        // This should be done in your Application class or MainActivity, but is added here for completeness.
         createNotificationChannel()
-
         startForeground(1, buildNotification())
+        Log.i("AudioRelay", "Service onCreate called, foreground started.")
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         isServerRunning = true
+        // Check for intent extra to override TLS (for dev/advanced users)
+        useTls = intent?.getBooleanExtra("useTls", true) ?: true
         serverThread = Thread { startAudioServer() }
         serverThread?.start()
-        Log.i("AudioRelay", "Service onCreate called, starting foreground service.")
+        Log.i("AudioRelay", "Service onStartCommand: useTls=$useTls, server thread started.")
+        return START_STICKY
     }
 
     private fun buildNotification(): Notification {
-        val builder = NotificationCompat.Builder(this, "audioRelayChannel")
-            .setContentTitle("AudioRelay")
-            .setContentText("Playing audio from PC")
-            .setSmallIcon(R.drawable.ic_media_play) // Use a valid drawable resource
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession.sessionToken)
-            )
+        val builder =
+            NotificationCompat.Builder(this, "audioRelayChannel")
+                .setContentTitle("AudioRelay")
+                .setContentText("Playing audio from PC")
+                .setSmallIcon(
+                    R.drawable.ic_media_play
+                ) // Use a valid drawable resource
+                .setStyle(
+                    androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(mediaSession.sessionToken)
+                )
         return builder.build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "audioRelayChannel",
-                "Audio Relay Channel",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel =
+                NotificationChannel(
+                    "audioRelayChannel",
+                    "Audio Relay Channel",
+                    NotificationManager.IMPORTANCE_LOW
+                )
             notificationManager.createNotificationChannel(channel)
         }
     }
@@ -76,6 +88,32 @@ class AudioRelayService : Service() {
         val minBufSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
         try {
+            // --- TLS/Plain socket selection ---
+            if (useTls) {
+                // --- TLS Setup ---
+                // You must convert your PEM cert/key to a PKCS12 keystore:
+                // openssl pkcs12 -export -in cert.pem -inkey key.pem -out server.p12 -name audiorelay -CAfile ca.pem -caname root
+                // Place server.p12 in app's files or raw resources.
+                val keystorePassword = "changeit" // Use your actual password
+                val keystoreStream = applicationContext.assets.open("server.p12") // Or use resources/raw
+                val keyStore = KeyStore.getInstance("PKCS12")
+                keyStore.load(keystoreStream, keystorePassword.toCharArray())
+
+                val kmf = KeyManagerFactory.getInstance("X509")
+                kmf.init(keyStore, keystorePassword.toCharArray())
+
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(kmf.keyManagers, null, null)
+                val sslServerSocketFactory = sslContext.serverSocketFactory as SSLServerSocketFactory
+                serverSocket = sslServerSocketFactory.createServerSocket(port) as SSLServerSocket
+                (serverSocket as SSLServerSocket).needClientAuth = false
+                Log.i("AudioRelay", "TLS enabled. Listening on port $port")
+            } else {
+                // --- Plain TCP ---
+                serverSocket = ServerSocket(port)
+                Log.i("AudioRelay", "Plain TCP. Listening on port $port")
+            }
+
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -97,12 +135,8 @@ class AudioRelayService : Service() {
             audioTrack?.play()
             Log.i("AudioRelay", "AudioTrack playing.")
 
-            serverSocket = ServerSocket(port)
-            Log.i("AudioRelay", "Listening on port $port")
-
             while (isServerRunning) {
                 try {
-                    // This block should now be correctly recognized after adding imports
                     serverSocket?.accept()?.use { client ->
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
                         client.getInputStream().use { `in` ->

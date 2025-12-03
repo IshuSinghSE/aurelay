@@ -14,6 +14,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         createNotificationChannel()
         val intent = Intent(this, AudioRelayService::class.java)
+        // For production: do not set useTls, defaults to true (TLS)
         ContextCompat.startForegroundService(this, intent)
     }
 
