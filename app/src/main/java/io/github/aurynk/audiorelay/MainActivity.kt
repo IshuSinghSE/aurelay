@@ -5,10 +5,13 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
@@ -75,6 +78,12 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        
+        // Make navigation bar transparent
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        
         // Ensure the notification channel exists
         createNotificationChannel()
         
@@ -102,9 +111,44 @@ class MainActivity : ComponentActivity() {
         Log.d("MainActivity", "Broadcast receiver registered for CLIENT_CONNECTION")
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+            var themeMode by remember { mutableStateOf(prefs.getString("theme_mode", "system") ?: "system") }
+            var useDynamicColors by remember { mutableStateOf(prefs.getBoolean("use_dynamic_colors", true)) }
+            
+            // Listen for preference changes
+            DisposableEffect(Unit) {
+                val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    when (key) {
+                        "theme_mode" -> themeMode = prefs.getString("theme_mode", "system") ?: "system"
+                        "use_dynamic_colors" -> useDynamicColors = prefs.getBoolean("use_dynamic_colors", true)
+                    }
+                }
+                prefs.registerOnSharedPreferenceChangeListener(listener)
+                onDispose {
+                    prefs.unregisterOnSharedPreferenceChangeListener(listener)
+                }
+            }
+            
+            val isDarkTheme = when (themeMode) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
+            
+            val colorScheme = when {
+                useDynamicColors && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    if (isDarkTheme) dynamicDarkColorScheme(this)
+                    else dynamicLightColorScheme(this)
+                }
+                isDarkTheme -> darkColorScheme()
+                else -> lightColorScheme()
+            }
+            
+            MaterialTheme(colorScheme = colorScheme) {
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.systemBars),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     AurynkReceiverApp(
@@ -177,6 +221,8 @@ fun AurynkReceiverApp(
     val autoStart = prefs.getBoolean("auto_start_service", false)
     val showVisualizer = prefs.getBoolean("show_visualizer", true)
     val showVolumeSlider = prefs.getBoolean("show_volume_slider", true)
+    val themeMode = prefs.getString("theme_mode", "system") ?: "system"
+    val useDynamicColors = prefs.getBoolean("use_dynamic_colors", true)
 
     // --- STATE ---
     var isServiceRunning by remember { mutableStateOf(autoStart) } // Service state based on preference
@@ -435,11 +481,30 @@ fun AurynkReceiverApp(
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
             title = {
-                Text(
-                    text = "About Aurynk",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "About Aurynk",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = { 
+                            showSettingsDialog = true
+                            showAboutDialog = false 
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             },
             text = {
                 Column(
@@ -496,11 +561,6 @@ fun AurynkReceiverApp(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSettingsDialog = true; showAboutDialog = false }) {
-                    Text("Settings")
-                }
-            },
-            dismissButton = {
                 TextButton(onClick = { showAboutDialog = false }) {
                     Text("Close")
                 }
@@ -515,6 +575,8 @@ fun AurynkReceiverApp(
         var tempAutoStart by remember { mutableStateOf(prefs.getBoolean("auto_start_service", false)) }
         var tempShowVisualizer by remember { mutableStateOf(prefs.getBoolean("show_visualizer", true)) }
         var tempShowVolumeSlider by remember { mutableStateOf(prefs.getBoolean("show_volume_slider", true)) }
+        var tempThemeMode by remember { mutableStateOf(prefs.getString("theme_mode", "system") ?: "system") }
+        var tempUseDynamicColors by remember { mutableStateOf(prefs.getBoolean("use_dynamic_colors", true)) }
         
         AlertDialog(
             onDismissRequest = { showSettingsDialog = false },
@@ -555,6 +617,74 @@ fun AurynkReceiverApp(
                     }
                     
                     HorizontalDivider()
+                    
+                    // Theme mode setting
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "App Theme",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Choose your preferred theme",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = tempThemeMode == "system",
+                                onClick = { tempThemeMode = "system" },
+                                label = { Text("System") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = tempThemeMode == "light",
+                                onClick = { tempThemeMode = "light" },
+                                label = { Text("Light") },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = tempThemeMode == "dark",
+                                onClick = { tempThemeMode = "dark" },
+                                label = { Text("Dark") },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    
+                    HorizontalDivider()
+                    
+                    // Dynamic colors setting (Android 12+)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dynamic Colors",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Use colors from your wallpaper",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = tempUseDynamicColors,
+                                onCheckedChange = { tempUseDynamicColors = it }
+                            )
+                        }
+                        
+                        HorizontalDivider()
+                    }
                     
                     // Show volume slider setting
                     Row(
@@ -615,6 +745,8 @@ fun AurynkReceiverApp(
                             putBoolean("auto_start_service", tempAutoStart)
                             putBoolean("show_volume_slider", tempShowVolumeSlider)
                             putBoolean("show_visualizer", tempShowVisualizer)
+                            putString("theme_mode", tempThemeMode)
+                            putBoolean("use_dynamic_colors", tempUseDynamicColors)
                             apply()
                         }
                         showSettingsDialog = false

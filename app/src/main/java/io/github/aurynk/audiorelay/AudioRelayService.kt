@@ -5,6 +5,7 @@ import android.R
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.media.AudioAttributes
@@ -39,6 +40,8 @@ class AudioRelayService : Service() {
         const val EXTRA_VOLUME = "volume"
         const val ACTION_AUDIO_LEVEL = "io.github.aurynk.AUDIO_LEVEL"
         const val EXTRA_AUDIO_LEVELS = "audio_levels"
+        const val ACTION_STOP_SERVICE = "io.github.aurynk.STOP_SERVICE"
+        const val ACTION_OPEN_APP = "io.github.aurynk.OPEN_APP"
     }
 
     override fun onCreate() {
@@ -52,6 +55,11 @@ class AudioRelayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_STOP_SERVICE -> {
+                Log.d("AudioRelay", "Stopping service from notification action")
+                stopSelf()
+                return START_NOT_STICKY
+            }
             ACTION_SET_VOLUME -> {
                 val volume = intent.getFloatExtra(EXTRA_VOLUME, 0.8f)
                 setVolume(volume)
@@ -73,16 +81,40 @@ class AudioRelayService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        // Create intent to open the app
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openAppIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
+        // Create intent to disconnect (stop service)
+        val disconnectIntent = Intent(this, AudioRelayService::class.java).apply {
+            action = ACTION_STOP_SERVICE
+        }
+        val disconnectPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            disconnectIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
         val builder =
             NotificationCompat.Builder(this, "audioRelayChannel")
-                .setContentTitle("AudioRelay")
+                .setContentTitle("Aurynk")
                 .setContentText("Playing audio from PC")
-                .setSmallIcon(
-                    R.drawable.ic_media_play
-                ) // Use a valid drawable resource
+                .setSmallIcon(R.drawable.ic_media_play)
+                .setContentIntent(openAppPendingIntent)
+                .addAction(R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
+                .addAction(R.drawable.ic_menu_preferences, "Open App", openAppPendingIntent)
                 .setStyle(
                     androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.sessionToken)
+                        .setShowActionsInCompactView(0, 1)
                 )
         return builder.build()
     }
