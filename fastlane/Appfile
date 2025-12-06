@@ -1,0 +1,2 @@
+json_key_file("fastlane/google-play-key.json") # Path to the json secret file - managed via environment variable
+package_name("com.devindeed.aurelay") # e.g. com.krausefx.app

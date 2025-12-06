@@ -1,0 +1,142 @@
+# Fastlane Configuration for Aurelay Android App
+# This file contains the fastlane configuration for building and deploying the app
+
+default_platform(:android)
+
+platform :android do
+  desc "Build a release APK"
+  lane :build_apk do
+    gradle(
+      task: "clean assembleRelease",
+      project_dir: "./"
+    )
+  end
+
+  desc "Build a release App Bundle (AAB)"
+  lane :build_aab do
+    gradle(
+      task: "clean bundleRelease",
+      project_dir: "./"
+    )
+  end
+
+  desc "Deploy a new version to the Google Play Internal Track"
+  lane :internal do
+    # Build the release bundle
+    build_aab
+    
+    # Upload to Play Store internal track
+    upload_to_play_store(
+      track: 'internal',
+      aab: './app/build/outputs/bundle/release/app-release.aab',
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Deploy a new version to the Google Play Beta Track"
+  lane :beta do
+    # Build the release bundle
+    build_aab
+    
+    # Upload to Play Store beta track
+    upload_to_play_store(
+      track: 'beta',
+      aab: './app/build/outputs/bundle/release/app-release.aab',
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Promote from beta to production"
+  lane :promote_to_production do
+    upload_to_play_store(
+      track: 'beta',
+      track_promote_to: 'production',
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Deploy a new version to Production"
+  lane :production do
+    # Build the release bundle
+    build_aab
+    
+    # Upload to Play Store production track
+    upload_to_play_store(
+      track: 'production',
+      aab: './app/build/outputs/bundle/release/app-release.aab',
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  desc "Submit a new build to Internal Testing and create a GitHub Release"
+  lane :release do |options|
+    # Build release bundle
+    build_aab
+    
+    # Also build APK for GitHub Release
+    build_apk
+    
+    # Upload to Play Store internal track
+    upload_to_play_store(
+      track: 'internal',
+      aab: './app/build/outputs/bundle/release/app-release.aab',
+      skip_upload_apk: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false
+    )
+    
+    # Note: GitHub release creation will be handled by GitHub Actions
+    # This lane focuses on Play Store deployment
+  end
+
+  desc "Increment version code"
+  lane :bump_version_code do
+    increment_version_code(
+      gradle_file_path: "app/build.gradle.kts"
+    )
+  end
+
+  desc "Increment version name (patch)"
+  lane :bump_version_name do |options|
+    type = options[:type] || "patch" # major, minor, patch
+    increment_version_name(
+      gradle_file_path: "app/build.gradle.kts",
+      bump_type: type
+    )
+  end
+
+  desc "Run tests"
+  lane :test do
+    gradle(
+      task: "test",
+      project_dir: "./"
+    )
+  end
+
+  desc "Run lint checks"
+  lane :lint do
+    gradle(
+      task: "lint",
+      project_dir: "./"
+    )
+  end
+
+  error do |lane, exception|
+    # This block is called if there was an error running a lane
+    UI.error("Error in lane #{lane}: #{exception}")
+  end
+end

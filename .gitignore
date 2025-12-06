@@ -71,4 +71,4 @@ Thumbs.db
 # temp files
 temp/
 tmp/
-coverage/
+coverage/fastlane/google-play-key.json
