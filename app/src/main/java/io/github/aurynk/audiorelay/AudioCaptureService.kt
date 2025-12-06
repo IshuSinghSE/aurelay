@@ -11,6 +11,8 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -33,12 +35,16 @@ class AudioCaptureService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
+    private var audioTrack: AudioTrack? = null // For local playback
     private var clientSocket: Socket? = null
     private var targetIp: String = ""
     private var targetPort: Int = 5000
+    private var audioOutputMode: String = "remote_only" // this_device, remote_only, both_devices
     private var isStreaming = false
     private var discoveryThread: Thread? = null
     private var discoverySocket: DatagramSocket? = null
+    private var audioManager: AudioManager? = null
+    private var originalMediaVolume: Int = 0
 
     companion object {
         const val ACTION_START = "ACTION_START"
@@ -46,6 +52,7 @@ class AudioCaptureService : Service() {
         const val EXTRA_RESULT_DATA = "EXTRA_RESULT_DATA"
         const val EXTRA_TARGET_IP = "EXTRA_TARGET_IP"
         const val EXTRA_TARGET_PORT = "EXTRA_TARGET_PORT"
+        const val EXTRA_AUDIO_OUTPUT_MODE = "EXTRA_AUDIO_OUTPUT_MODE"
         const val NOTIFICATION_ID = 1002
         const val CHANNEL_ID = "AudioCaptureChannel"
         const val TAG = "AudioCaptureService"
@@ -142,6 +149,7 @@ class AudioCaptureService : Service() {
                 
                 targetIp = intent.getStringExtra(EXTRA_TARGET_IP) ?: ""
                 targetPort = intent.getIntExtra(EXTRA_TARGET_PORT, 5000)
+                audioOutputMode = intent.getStringExtra(EXTRA_AUDIO_OUTPUT_MODE) ?: "remote_only"
 
                 if (resultData != null && targetIp.isNotEmpty()) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -184,6 +192,8 @@ class AudioCaptureService : Service() {
             val config = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                // Exclude our own app's audio to prevent feedback loop
+                .excludeUid(android.os.Process.myUid())
                 .build()
 
             val audioFormat = AudioFormat.Builder()
@@ -193,16 +203,66 @@ class AudioCaptureService : Service() {
                 .build()
 
             try {
-                audioRecord = AudioRecord.Builder()
-                    .setAudioFormat(audioFormat)
-                    .setAudioPlaybackCaptureConfig(config)
-                    .build()
+                // Only start AudioRecord for modes that need streaming
+                if (audioOutputMode == "remote_only" || audioOutputMode == "both_devices") {
+                    audioRecord = AudioRecord.Builder()
+                        .setAudioFormat(audioFormat)
+                        .setAudioPlaybackCaptureConfig(config)
+                        .build()
 
-                audioRecord?.startRecording()
-                isStreaming = true
+                    audioRecord?.startRecording()
+                    isStreaming = true
+                }
+                
+                // Initialize local audio playback ONLY for both_devices mode
+                // In this_device mode, audio already plays naturally on the device
+                if (audioOutputMode == "both_devices") {
+                    val minBufferSize = AudioTrack.getMinBufferSize(
+                        44100,
+                        AudioFormat.CHANNEL_OUT_STEREO,
+                        AudioFormat.ENCODING_PCM_16BIT
+                    )
+                    
+                    audioTrack = AudioTrack.Builder()
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                .setFlags(AudioAttributes.FLAG_LOW_LATENCY)
+                                .build()
+                        )
+                        .setAudioFormat(
+                            AudioFormat.Builder()
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setSampleRate(44100)
+                                .build()
+                        )
+                        .setBufferSizeInBytes(minBufferSize)
+                        .setTransferMode(AudioTrack.MODE_STREAM)
+                        .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                        .build()
+                    
+                    audioTrack?.play()
+                    Log.d(TAG, "Local audio playback enabled (mode: $audioOutputMode)")
+                }
 
-                // Connect and stream in a single coroutine to ensure proper sequencing
-                connectAndStream()
+                // Mute device for remote_only mode
+                if (audioOutputMode == "remote_only") {
+                    audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    originalMediaVolume = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+                    audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                    Log.d(TAG, "Muted device volume for remote_only mode (original: $originalMediaVolume)")
+                }
+
+                // Connect and stream based on mode
+                if (audioOutputMode == "remote_only" || audioOutputMode == "both_devices") {
+                    connectAndStream()
+                } else {
+                    // this_device mode: audio plays naturally, just need to keep service alive
+                    Log.d(TAG, "This device mode: audio playing naturally on device")
+                    // Service stays alive in foreground, no streaming needed
+                }
 
             } catch (e: SecurityException) {
                 Log.e(TAG, "Security Exception starting AudioRecord: ${e.message}")
@@ -230,8 +290,8 @@ class AudioCaptureService : Service() {
                 clientSocket?.tcpNoDelay = true // Disable Nagle's algorithm for low latency
                 Log.d(TAG, "Connected to receiver successfully")
                 
-                // Then start streaming
-                val bufferSize = 1024 * 4
+                // Then start streaming with smaller buffer for lower latency
+                val bufferSize = 1024 * 2  // Reduced from 4KB to 2KB for lower latency
                 val buffer = ByteArray(bufferSize)
                 val outputStream = clientSocket?.getOutputStream()
                 
@@ -249,9 +309,14 @@ class AudioCaptureService : Service() {
                     val read = audioRecord?.read(buffer, 0, bufferSize) ?: 0
                     if (read > 0) {
                         try {
+                            // Stream to remote device (removed flush() to reduce jitter)
                             outputStream.write(buffer, 0, read)
-                            outputStream.flush()
                             bytesWritten += read
+                            
+                            // Also play locally if both_devices mode
+                            if (audioOutputMode == "both_devices" && audioTrack != null) {
+                                audioTrack?.write(buffer, 0, read)
+                            }
                             
                             // Log progress every 5 seconds
                             val now = System.currentTimeMillis()
@@ -285,6 +350,12 @@ class AudioCaptureService : Service() {
         isStreaming = false
         serviceJob.cancel()
         
+        // Restore volume if it was muted
+        if (audioOutputMode == "remote_only" && audioManager != null) {
+            audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, originalMediaVolume, 0)
+            Log.d(TAG, "Restored device volume to $originalMediaVolume")
+        }
+        
         // Stop UDP listener
         try {
             discoveryThread?.interrupt()
@@ -302,6 +373,10 @@ class AudioCaptureService : Service() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+        
+        audioTrack?.stop()
+        audioTrack?.release()
+        audioTrack = null
 
         mediaProjection?.stop()
         mediaProjection = null

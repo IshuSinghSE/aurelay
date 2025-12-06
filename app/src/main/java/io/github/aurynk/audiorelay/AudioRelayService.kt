@@ -32,6 +32,7 @@ class AudioRelayService : Service() {
     private lateinit var notificationManager: NotificationManagerCompat
     private var serverThread: Thread? = null
     @Volatile private var lastClientIp: String = ""
+    @Volatile private var lastClientName: String = ""
 
     @Volatile private var isServerRunning = true
     private var serverSocket: ServerSocket? = null
@@ -94,6 +95,8 @@ class AudioRelayService : Service() {
                             try {
                                 val parts = msg.split(";")
                                 val senderName = parts.getOrNull(1) ?: "Android Device"
+                                // Store the sender name for notification updates
+                                lastClientName = senderName
                                 val bcast = Intent(MainActivity.ACTION_CONNECTION_REQUEST)
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("client_ip", packet.address.hostAddress ?: "")
@@ -204,20 +207,50 @@ class AudioRelayService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
+        // Get sender device name (if connected) or show "Ready to receive"
+        val displayText = if (lastClientName.isNotEmpty()) {
+            "Streaming from $lastClientName"
+        } else {
+            "Ready to receive audio"
+        }
+        
         val builder =
             NotificationCompat.Builder(this, "audioRelayChannel")
                 .setContentTitle("Aurynk")
-                .setContentText("Playing audio from PC")
+                .setContentText(displayText)
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(openAppPendingIntent)
-                .addAction(R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
-                .addAction(R.drawable.ic_menu_preferences, "Open App", openAppPendingIntent)
+                .addAction(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Disconnect",
+                    disconnectPendingIntent
+                )
+                .addAction(
+                    android.R.drawable.ic_menu_preferences,
+                    "Open App",
+                    openAppPendingIntent
+                )
                 .setStyle(
                     androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.sessionToken)
                         .setShowActionsInCompactView(0, 1)
                 )
         return builder.build()
+    }
+    
+    private fun getDeviceName(): String {
+        return try {
+            val manufacturer = Build.MANUFACTURER?.replaceFirstChar { it.uppercase() } ?: ""
+            val model = Build.MODEL ?: "Android Device"
+            
+            when {
+                model.startsWith(manufacturer, ignoreCase = true) -> model
+                manufacturer.isNotEmpty() -> "$manufacturer $model"
+                else -> model
+            }
+        } catch (e: Exception) {
+            "Android Device"
+        }
     }
 
     private fun createNotificationChannel() {
@@ -343,6 +376,8 @@ class AudioRelayService : Service() {
                         client.tcpNoDelay = true // Disable Nagle's algorithm for lower latency
                         client.receiveBufferSize = 4096 // Smaller buffer for lower latency
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
+                        // Update notification with sender name
+                        notificationManager.notify(1, buildNotification())
                         // Broadcast connection event so UI can update
                         try {
                             val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
@@ -449,6 +484,9 @@ class AudioRelayService : Service() {
                             audioTrack?.flush()
                         }
                         Log.i("AudioRelay", "Client disconnected.")
+                        // Clear client info and update notification
+                        lastClientName = ""
+                        notificationManager.notify(1, buildNotification())
                         // Broadcast disconnect event so UI can update
                         try {
                             val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
@@ -597,6 +635,7 @@ class AudioRelayService : Service() {
             sendBroadcast(bcast)
             Log.i("AudioRelay", "Broadcast sent from onDestroy: CLIENT_CONNECTION connected=false")
             lastClientIp = ""
+            lastClientName = ""
         } catch (ex: Exception) {
             Log.e("AudioRelay", "Failed to broadcast disconnection on destroy: ${ex.message}", ex)
         }
