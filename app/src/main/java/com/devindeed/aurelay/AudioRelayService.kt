@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 //noinspection SuspiciousImport
 import android.R
@@ -40,20 +40,20 @@ class AudioRelayService : Service() {
     private var audioTrack: AudioTrack? = null
     
     companion object {
-        const val ACTION_SET_VOLUME = "io.github.aurynk.SET_VOLUME"
+        const val ACTION_SET_VOLUME = "com.devindeed.aurelay.SET_VOLUME"
         const val EXTRA_VOLUME = "volume"
-        const val ACTION_AUDIO_LEVEL = "io.github.aurynk.AUDIO_LEVEL"
+        const val ACTION_AUDIO_LEVEL = "com.devindeed.aurelay.AUDIO_LEVEL"
         const val EXTRA_AUDIO_LEVELS = "audio_levels"
-        const val ACTION_STOP_SERVICE = "io.github.aurynk.STOP_SERVICE"
-        const val ACTION_OPEN_APP = "io.github.aurynk.OPEN_APP"
+        const val ACTION_STOP_SERVICE = "com.devindeed.aurelay.STOP_SERVICE"
+        const val ACTION_OPEN_APP = "com.devindeed.aurelay.OPEN_APP"
 
         // Discovery constants — desktop client will broadcast DISCOVERY_REQUEST
         // and the service will reply with DISCOVERY_RESPONSE;<port>;<name>
         const val DISCOVERY_PORT = 5002
-        const val DISCOVERY_REQUEST = "AURYNK_DISCOVER"
-        const val DISCOVERY_RESPONSE = "AURYNK_RESPONSE"
-        const val CONNECT_REQUEST = "AURYNK_CONNECT"
-        const val DISCONNECT_REQUEST = "AURYNK_DISCONNECT"
+        const val DISCOVERY_REQUEST = "AURELAY_DISCOVER"
+        const val DISCOVERY_RESPONSE = "AURELAY_RESPONSE"
+        const val CONNECT_REQUEST = "AURELAY_CONNECT"
+        const val DISCONNECT_REQUEST = "AURELAY_DISCONNECT"
     }
 
     override fun onCreate() {
@@ -106,11 +106,11 @@ class AudioRelayService : Service() {
                             } catch (ex: Exception) {
                                 Log.e("AudioRelay", "Failed to broadcast connect request: ${ex.message}", ex)
                             }
-                        } else if (msg.startsWith("AURYNK_ACCEPT")) {
+                        } else if (msg.startsWith("AURELAY_ACCEPT")) {
                             // Connection accepted - could be received by sender OR receiver
                             // If receiver gets this, it means the sender acknowledged the acceptance
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", true)
                                 bcast.putExtra("client_ip", packet.address.hostAddress ?: "")
@@ -119,10 +119,10 @@ class AudioRelayService : Service() {
                             } catch (ex: Exception) {
                                 Log.e("AudioRelay", "Failed to broadcast connection accepted: ${ex.message}", ex)
                             }
-                        } else if (msg.startsWith("AURYNK_REJECT")) {
+                        } else if (msg.startsWith("AURELAY_REJECT")) {
                             // Connection rejected by receiver
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", false)
                                 bcast.putExtra("client_ip", "")
@@ -133,7 +133,7 @@ class AudioRelayService : Service() {
                             }
                         } else if (msg.startsWith(DISCONNECT_REQUEST)) {
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", false)
                                 bcast.putExtra("client_ip", "")
@@ -216,7 +216,7 @@ class AudioRelayService : Service() {
         
         val builder =
             NotificationCompat.Builder(this, "audioRelayChannel")
-                .setContentTitle("Aurynk")
+                .setContentTitle("Aurelay")
                 .setContentText(displayText)
                 .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(openAppPendingIntent)
@@ -380,7 +380,7 @@ class AudioRelayService : Service() {
                         notificationManager.notify(1, buildNotification())
                         // Broadcast connection event so UI can update
                         try {
-                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                             bcast.setPackage(packageName) // Make it explicit to this app
                             bcast.putExtra("connected", true)
                             bcast.putExtra("client_ip", client.inetAddress.hostAddress)
@@ -489,7 +489,7 @@ class AudioRelayService : Service() {
                         notificationManager.notify(1, buildNotification())
                         // Broadcast disconnect event so UI can update
                         try {
-                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                             bcast.setPackage(packageName) // Make it explicit to this app
                             bcast.putExtra("connected", false)
                             bcast.putExtra("client_ip", "")
@@ -628,7 +628,7 @@ class AudioRelayService : Service() {
         }
         // Ensure UI knows we're disconnected when service stops
         try {
-            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
             bcast.setPackage(packageName)
             bcast.putExtra("connected", false)
             bcast.putExtra("client_ip", "")
