@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 import android.app.Notification
 import android.app.NotificationChannel

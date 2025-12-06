@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay.ui.theme
+package com.devindeed.aurelay.ui.theme
 
 import android.app.Activity
 import android.os.Build

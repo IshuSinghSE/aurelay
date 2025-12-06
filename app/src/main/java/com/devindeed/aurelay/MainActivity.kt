@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 import android.content.Intent
 import android.net.Uri
@@ -78,8 +78,8 @@ class MainActivity : ComponentActivity() {
     private var pendingConnectionRequest by mutableStateOf<Pair<String, String>?>(null) // IP, Name
     
     companion object {
-        const val ACTION_CONNECTION_REQUEST = "io.github.aurynk.CONNECTION_REQUEST"
-        const val ACTION_CONNECTION_RESPONSE = "io.github.aurynk.CONNECTION_RESPONSE"
+        const val ACTION_CONNECTION_REQUEST = "com.devindeed.aurelay.CONNECTION_REQUEST"
+        const val ACTION_CONNECTION_RESPONSE = "com.devindeed.aurelay.CONNECTION_RESPONSE"
         const val EXTRA_APPROVED = "approved"
     }
     
@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(ctx: Context?, intent: AndroidIntent?) {
             intent ?: return
             when (intent.action) {
-                "io.github.aurynk.CLIENT_CONNECTION" -> {
+                "com.devindeed.aurelay.CLIENT_CONNECTION" -> {
                     val connected = intent.getBooleanExtra("connected", false)
                     val ip = intent.getStringExtra("client_ip") ?: ""
                     Log.d("MainActivity", "Broadcast received: connected=$connected, ip=$ip")
@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
         
         // Register broadcast receiver with proper flags for all Android versions
         val filter = IntentFilter().apply {
-            addAction("io.github.aurynk.CLIENT_CONNECTION")
+            addAction("com.devindeed.aurelay.CLIENT_CONNECTION")
             addAction(ACTION_CONNECTION_REQUEST)
             addAction(AudioRelayService.ACTION_AUDIO_LEVEL)
         }
@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
                         .windowInsetsPadding(WindowInsets.systemBars),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AurynkApp(
+                    AurelayApp(
                         context = this,
                         isClientConnected = connectionState,
                         clientIp = clientIpState,
@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
             var sock: DatagramSocket? = null
             try {
                 sock = DatagramSocket()
-                val msg = if (approved) "AURYNK_ACCEPT" else "AURYNK_REJECT"
+                val msg = if (approved) "AURELAY_ACCEPT" else "AURELAY_REJECT"
                 val packet = DatagramPacket(msg.toByteArray(), msg.length, InetAddress.getByName(targetIp), AudioRelayService.DISCOVERY_PORT)
                 sock.send(packet)
                 Log.d("MainActivity", "Sent connection response: $msg to $targetIp")
@@ -422,7 +422,7 @@ fun getPairedDevices(context: Context): List<PairedDevice> {
         }
         devices
     } catch (e: Exception) {
-        Log.e("Aurynk", "Failed to parse paired devices: ${e.message}")
+        Log.e("Aurelay", "Failed to parse paired devices: ${e.message}")
         emptyList()
     }
 }
@@ -458,7 +458,7 @@ fun savePairedDevices(context: Context, devices: List<PairedDevice>) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AurynkApp(
+fun AurelayApp(
     context: Context,
     isClientConnected: Boolean,
     clientIp: String,
@@ -561,7 +561,7 @@ fun AurynkApp(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Aurynk", fontWeight = FontWeight.Bold) },
+                title = { Text("Aurelay", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = { showAboutDialog = true }) {
                         Icon(
@@ -858,7 +858,7 @@ fun AurynkApp(
                                                             if (text.startsWith(AudioRelayService.DISCOVERY_RESPONSE)) {
                                                                 val parts = text.split(';')
                                                                 val respPort = parts.getOrNull(1)?.toIntOrNull() ?: 5000
-                                                                val name = parts.getOrNull(2) ?: "Aurynk"
+                                                                val name = parts.getOrNull(2) ?: "Aurelay"
                                                                 val ip = resp.address.hostAddress ?: ""
                                                                 // Filter out self device IP
                                                                 if (ip != deviceIp) {
@@ -871,7 +871,7 @@ fun AurynkApp(
                                                         }
                                                     }
                                                 } catch (e: Exception) {
-                                                    Log.e("Aurynk", "Discovery failed: ${e.message}")
+                                                    Log.e("Aurelay", "Discovery failed: ${e.message}")
                                                 } finally {
                                                     try { sock?.close() } catch (e: Exception) {}
                                                     isDiscovering = false
@@ -1376,7 +1376,7 @@ fun AurynkApp(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "About Aurynk",
+                        text = "About Aurelay",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -1430,7 +1430,7 @@ fun AurynkApp(
                     Spacer(Modifier.height(4.dp))
                     
                     Text(
-                        text = "© 2025 Aurynk Audio Relay. Open Source Project.",
+                        text = "© 2025 Aurelay Audio Relay. Open Source Project.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1858,10 +1858,10 @@ fun FakeAudioVisualizer() {
 
 @Preview
 @Composable
-fun PreviewAurynkApp() {
+fun PreviewAurelayApp() {
     MaterialTheme(colorScheme = darkColorScheme()) {
         // For preview, create a mock context
-        AurynkApp(
+        AurelayApp(
             context = androidx.compose.ui.platform.LocalContext.current,
             isClientConnected = false,
             clientIp = "",

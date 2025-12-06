@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay.ui.theme
+package com.devindeed.aurelay.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

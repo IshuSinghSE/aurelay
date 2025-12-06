@@ -8,11 +8,11 @@ import java.util.Properties
 import java.io.FileInputStream
 
 android {
-    namespace = "io.github.aurynk.audiorelay"
+    namespace = "com.devindeed.aurelay"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.aurynk.audiorelay"
+        applicationId = "com.devindeed.aurelay"
         minSdk = 24
         targetSdk = 36
         versionCode = 3

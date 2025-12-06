@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
