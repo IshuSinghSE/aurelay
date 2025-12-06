@@ -1,6 +1,7 @@
 package io.github.aurynk.audiorelay
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -356,6 +357,83 @@ fun getDeviceIpAddress(context: Context): String {
     return "Unknown"
 }
 
+// Paired device data class
+data class PairedDevice(
+    val name: String,
+    val ip: String,
+    val port: Int
+)
+
+// Helper functions for paired devices
+fun getPairedDevices(context: Context): List<PairedDevice> {
+    val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+    val json = prefs.getString("paired_devices", "[]") ?: "[]"
+    return try {
+        val devices = mutableListOf<PairedDevice>()
+        // Simple JSON parsing (manual to avoid dependencies)
+        if (json.startsWith("[") && json.endsWith("]")) {
+            val content = json.substring(1, json.length - 1)
+            if (content.isNotEmpty()) {
+                val items = content.split("},{")
+                items.forEach { item ->
+                    val cleaned = item.replace("{", "").replace("}", "")
+                    val parts = cleaned.split(",")
+                    var name = ""
+                    var ip = ""
+                    var port = 5000
+                    parts.forEach { part ->
+                        val kv = part.split(":")
+                        if (kv.size == 2) {
+                            val key = kv[0].trim().replace("\"", "")
+                            val value = kv[1].trim().replace("\"", "")
+                            when (key) {
+                                "name" -> name = value
+                                "ip" -> ip = value
+                                "port" -> port = value.toIntOrNull() ?: 5000
+                            }
+                        }
+                    }
+                    if (name.isNotEmpty() && ip.isNotEmpty()) {
+                        devices.add(PairedDevice(name, ip, port))
+                    }
+                }
+            }
+        }
+        devices
+    } catch (e: Exception) {
+        Log.e("Aurynk", "Failed to parse paired devices: ${e.message}")
+        emptyList()
+    }
+}
+
+fun savePairedDevice(context: Context, device: PairedDevice) {
+    val devices = getPairedDevices(context).toMutableList()
+    // Remove if already exists
+    devices.removeAll { it.ip == device.ip }
+    // Add new
+    devices.add(device)
+    savePairedDevices(context, devices)
+}
+
+fun removePairedDevice(context: Context, ip: String) {
+    val devices = getPairedDevices(context).toMutableList()
+    devices.removeAll { it.ip == ip }
+    savePairedDevices(context, devices)
+}
+
+fun savePairedDevices(context: Context, devices: List<PairedDevice>) {
+    val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+    // Build JSON manually
+    val json = devices.joinToString(
+        prefix = "[",
+        postfix = "]",
+        separator = ","
+    ) { device ->
+        "{\"name\":\"${device.name}\",\"ip\":\"${device.ip}\",\"port\":${device.port}}"
+    }
+    prefs.edit().putString("paired_devices", json).apply()
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -377,7 +455,6 @@ fun AurynkApp(
     val showVisualizer = prefs.getBoolean("show_visualizer", true)
     val showVolumeSlider = prefs.getBoolean("show_volume_slider", true)
     val requireConnectionConfirm = prefs.getBoolean("require_connection_confirm", true)
-    val audioOutputMode = prefs.getString("audio_output_mode", "receiver") ?: "receiver"
     val themeMode = prefs.getString("theme_mode", "system") ?: "system"
     val useDynamicColors = prefs.getBoolean("use_dynamic_colors", true)
 
@@ -708,7 +785,8 @@ fun AurynkApp(
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                     )
                                 } else {
-                                    // Broadcast mode: show nearby discovered devices
+                                    // Broadcast mode: show paired and nearby discovered devices
+                                    val pairedDevices = remember { mutableStateListOf<PairedDevice>().apply { addAll(getPairedDevices(context)) } }
                                     val discoveredDevices = remember { mutableStateListOf<Triple<String, Int, String>>() }
                                     var isDiscovering by remember { mutableStateOf(false) }
                                     val coroutineScope = rememberCoroutineScope()
@@ -763,6 +841,119 @@ fun AurynkApp(
                                     LaunchedEffect(isBroadcastMode) {
                                         if (isBroadcastMode) doDiscovery()
                                     }
+                                    
+                                    // Paired Devices Section
+                                    if (pairedDevices.isNotEmpty()) {
+                                        Text(
+                                            "Paired Devices",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        
+                                        Spacer(Modifier.height(12.dp))
+                                        
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            pairedDevices.forEachIndexed { idx, device ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 10.dp, horizontal = 6.dp)
+                                                        .clickable {
+                                                            onClientIpSelected(device.ip)
+                                                            Toast.makeText(context, "Selected ${device.name} (${device.ip}:${device.port})", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Text(
+                                                                device.name,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                style = MaterialTheme.typography.bodyLarge
+                                                            )
+                                                            Spacer(Modifier.width(8.dp))
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                                                shape = RoundedCornerShape(4.dp)
+                                                            ) {
+                                                                Text(
+                                                                    "PAIRED",
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(Modifier.height(3.dp))
+                                                        Text(
+                                                            "${device.ip}:${device.port}",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    Spacer(Modifier.width(8.dp))
+                                                    
+                                                    // Show connected state only if both selected AND service is running
+                                                    val isConnectedToThis = clientIp == device.ip && isServiceRunning
+                                                    if (isConnectedToThis) {
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                // Stop the service when disconnecting
+                                                                isServiceRunning = false
+                                                                val intent = Intent(context, AudioCaptureService::class.java)
+                                                                intent.action = AudioCaptureService.ACTION_STOP
+                                                                context.startService(intent)
+                                                                onClientIpSelected("")
+                                                                Toast.makeText(context, "Disconnected from ${device.name}", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            modifier = Modifier.wrapContentWidth(),
+                                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                                contentColor = MaterialTheme.colorScheme.error
+                                                            )
+                                                        ) {
+                                                            Text("Disconnect", style = MaterialTheme.typography.labelMedium)
+                                                        }
+                                                    } else {
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                            IconButton(
+                                                                onClick = {
+                                                                    pairedDevices.remove(device)
+                                                                    removePairedDevice(context, device.ip)
+                                                                    Toast.makeText(context, "Removed ${device.name}", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                modifier = Modifier.size(32.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Rounded.LinkOff,
+                                                                    contentDescription = "Forget",
+                                                                    tint = MaterialTheme.colorScheme.error
+                                                                )
+                                                            }
+                                                            Button(
+                                                                onClick = {
+                                                                    onClientIpSelected(device.ip)
+                                                                    Toast.makeText(context, "Connected to ${device.name} (${device.ip}:${device.port})", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                modifier = Modifier.wrapContentWidth()
+                                                            ) {
+                                                                Text("Connect", style = MaterialTheme.typography.labelMedium)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if (idx < pairedDevices.size - 1) {
+                                                    HorizontalDivider(
+                                                        modifier = Modifier.padding(horizontal = 6.dp),
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        
+                                        Spacer(Modifier.height(24.dp))
+                                    }
 
                                     Text(
                                         "Nearby Devices",
@@ -789,7 +980,11 @@ fun AurynkApp(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     } else {
-                                        if (discoveredDevices.isEmpty()) {
+                                        // Filter out paired devices from nearby list
+                                        val pairedIps = pairedDevices.map { it.ip }.toSet()
+                                        val nearbyDevices = discoveredDevices.filter { (ip, _, _) -> ip !in pairedIps }
+                                        
+                                        if (nearbyDevices.isEmpty()) {
                                             Text(
                                                 "No nearby receivers found.",
                                                 style = MaterialTheme.typography.bodyMedium,
@@ -805,7 +1000,7 @@ fun AurynkApp(
                                             }
                                         } else {
                                             Column(modifier = Modifier.fillMaxWidth()) {
-                                                discoveredDevices.forEachIndexed { idx, item ->
+                                                nearbyDevices.forEachIndexed { idx, item ->
                                                     val (ip, p, name) = item
                                                     Row(
                                                         modifier = Modifier
@@ -875,7 +1070,7 @@ fun AurynkApp(
                                                             }
                                                         }
                                                     }
-                                                    if (idx < discoveredDevices.size - 1) {
+                                                    if (idx < nearbyDevices.size - 1) {
                                                         HorizontalDivider(
                                                             modifier = Modifier.padding(horizontal = 6.dp),
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
@@ -975,6 +1170,8 @@ fun AurynkApp(
     
     // Connection Request Confirmation Dialog
     pendingConnectionRequest?.let { (ip, name) ->
+        var rememberDevice by remember { mutableStateOf(false) }
+        
         AlertDialog(
             onDismissRequest = { onConnectionResponse(false) },
             icon = {
@@ -1015,11 +1212,39 @@ fun AurynkApp(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    
+                    Spacer(Modifier.height(16.dp))
+                    
+                    // Remember device checkbox
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { rememberDevice = !rememberDevice }
+                            .padding(8.dp)
+                    ) {
+                        Checkbox(
+                            checked = rememberDevice,
+                            onCheckedChange = { rememberDevice = it }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Remember this device",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = { onConnectionResponse(true) },
+                    onClick = { 
+                        if (rememberDevice) {
+                            savePairedDevice(context, PairedDevice(name, ip, 5000))
+                            Toast.makeText(context, "Device saved to paired devices", Toast.LENGTH_SHORT).show()
+                        }
+                        onConnectionResponse(true)
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary
                     )
@@ -1073,17 +1298,37 @@ fun AurynkApp(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Version 1.0.0",
+                        text = "Version 2.0.0",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
                     )
                     
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        text = "Stream audio from your PC to your Android device over a secure TLS connection.",
+                        text = "Stream audio wirelessly between Android devices and desktop over your local network.",
                         style = MaterialTheme.typography.bodyMedium
                     )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Text(
+                        text = "Features",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Column(
+                        modifier = Modifier.padding(start = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("• Bidirectional audio streaming", style = MaterialTheme.typography.bodySmall)
+                        Text("• Automatic device discovery", style = MaterialTheme.typography.bodySmall)
+                        Text("• Connection confirmation & security", style = MaterialTheme.typography.bodySmall)
+                        Text("• Real-time audio visualization", style = MaterialTheme.typography.bodySmall)
+                        Text("• Low latency TCP streaming", style = MaterialTheme.typography.bodySmall)
+                    }
                     
                     Spacer(Modifier.height(8.dp))
                     
@@ -1094,7 +1339,7 @@ fun AurynkApp(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Ashutosh Singh",
+                        text = "Ishu Singh",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     
@@ -1109,13 +1354,18 @@ fun AurynkApp(
                     Text(
                         text = "github.com/IshuSinghSE/AudioRelay",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.clickable {
+                            // Open GitHub URL
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/IshuSinghSE/AudioRelay"))
+                            context.startActivity(intent)
+                        }
                     )
                     
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        text = "© 2025 Ishu Singh. All rights reserved.",
+                        text = "© 2025 Aurynk Audio Relay. Open Source Project.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1137,7 +1387,6 @@ fun AurynkApp(
         var tempShowVisualizer by remember { mutableStateOf(prefs.getBoolean("show_visualizer", true)) }
         var tempShowVolumeSlider by remember { mutableStateOf(prefs.getBoolean("show_volume_slider", true)) }
         var tempRequireConnectionConfirm by remember { mutableStateOf(prefs.getBoolean("require_connection_confirm", true)) }
-        var tempAudioOutputMode by remember { mutableStateOf(prefs.getString("audio_output_mode", "receiver") ?: "receiver") }
         var tempThemeMode by remember { mutableStateOf(prefs.getString("theme_mode", "system") ?: "system") }
         var tempUseDynamicColors by remember { mutableStateOf(prefs.getBoolean("use_dynamic_colors", true)) }
         
@@ -1205,46 +1454,6 @@ fun AurynkApp(
                             checked = tempRequireConnectionConfirm,
                             onCheckedChange = { tempRequireConnectionConfirm = it }
                         )
-                    }
-                    
-                    HorizontalDivider()
-                    
-                    // Audio output mode setting
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Audio Output",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "Where to play received audio",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = tempAudioOutputMode == "This Device",
-                                onClick = { tempAudioOutputMode = "This Device" },
-                                label = { Text("This Device") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            FilterChip(
-                                selected = tempAudioOutputMode == "sender",
-                                onClick = { tempAudioOutputMode = "sender" },
-                                label = { Text("Sender") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            FilterChip(
-                                selected = tempAudioOutputMode == "both",
-                                onClick = { tempAudioOutputMode = "both" },
-                                label = { Text("Both") },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
                     }
                     
                     HorizontalDivider()
@@ -1377,7 +1586,6 @@ fun AurynkApp(
                             putBoolean("show_volume_slider", tempShowVolumeSlider)
                             putBoolean("show_visualizer", tempShowVisualizer)
                             putBoolean("require_connection_confirm", tempRequireConnectionConfirm)
-                            putString("audio_output_mode", tempAudioOutputMode)
                             putString("theme_mode", tempThemeMode)
                             putBoolean("use_dynamic_colors", tempUseDynamicColors)
                             apply()

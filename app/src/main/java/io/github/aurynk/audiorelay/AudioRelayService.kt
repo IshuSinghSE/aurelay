@@ -208,7 +208,7 @@ class AudioRelayService : Service() {
             NotificationCompat.Builder(this, "audioRelayChannel")
                 .setContentTitle("Aurynk")
                 .setContentText("Playing audio from PC")
-                .setSmallIcon(R.drawable.ic_media_play)
+                .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(openAppPendingIntent)
                 .addAction(R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
                 .addAction(R.drawable.ic_menu_preferences, "Open App", openAppPendingIntent)
@@ -338,6 +338,10 @@ class AudioRelayService : Service() {
                     }
 
                     maybeClient?.use { client ->
+                        // Configure socket for robust streaming
+                        client.soTimeout = 100 // 100ms timeout prevents indefinite blocking
+                        client.tcpNoDelay = true // Disable Nagle's algorithm for lower latency
+                        client.receiveBufferSize = 4096 // Smaller buffer for lower latency
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
                         // Broadcast connection event so UI can update
                         try {
@@ -351,76 +355,94 @@ class AudioRelayService : Service() {
                             Log.e("AudioRelay", "Failed to broadcast client connected: ${ex.message}", ex)
                         }
                         client.getInputStream().use { `in` ->
-                            val buffer = ByteArray(minBufSize)
+                            val buffer = ByteArray(4096) // Reduced from minBufSize for lower latency
                             var read: Int
                             var frameCount = 0
+                            var consecutiveErrors = 0
                             val frameSize = 4 // Input is always stereo: 2 bytes per sample (16-bit) * 2 channels
                             val outputFrameSize = if (isStereo) 4 else 2 // Output frame size depends on AudioTrack config
                             
                             // Log buffer configuration for diagnostics
-                            Log.d("AudioRelay", "minBufSize=$minBufSize, bufferSizeBytes=$bufferSizeBytes, frameSize=$frameSize, outputMode=${if (isStereo) "STEREO" else "MONO"}")
+                            Log.d("AudioRelay", "buffer=4096 bytes, bufferSizeBytes=$bufferSizeBytes, frameSize=$frameSize, outputMode=${if (isStereo) "STEREO" else "MONO"}")
                             
                             // remember connected client
                             try {
                                 lastClientIp = client.inetAddress.hostAddress
                             } catch (ex: Exception) { lastClientIp = "" }
                             
-                            while (`in`.read(buffer).also { read = it } != -1 && isServerRunning) {
-                                if (read > 0) {
-                                    // Ensure we write frame-aligned data (critical for Android 12 and older HALs)
-                                    // Input stream is always stereo s16le from ffmpeg
-                                    val alignedBytes = (read / frameSize) * frameSize
+                            while (isServerRunning && consecutiveErrors < 5) {
+                                try {
+                                    read = `in`.read(buffer)
+                                    if (read == -1) break // End of stream
                                     
-                                    if (alignedBytes > 0) {
-                                        try {
-                                            // Use WRITE_BLOCKING only on Android 12 and below for compatibility
-                                            // Android 13+ handles non-blocking writes better
-                                            val writeMode = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
-                                                AudioTrack.WRITE_BLOCKING
-                                            } else {
-                                                AudioTrack.WRITE_NON_BLOCKING
-                                            }
-                                            
-                                            val written = if (isStereo) {
-                                                // Direct write for stereo
-                                                audioTrack?.write(buffer, 0, alignedBytes, writeMode)
-                                            } else {
-                                                // Convert stereo to mono by averaging L+R channels
-                                                val monoBuffer = convertStereoToMono(buffer, alignedBytes)
-                                                audioTrack?.write(monoBuffer, 0, monoBuffer.size, writeMode)
-                                            }
-                                            
-                                            if (written != null && written < 0) {
-                                                // Negative return codes indicate errors
-                                                Log.e("AudioRelay", "AudioTrack.write returned error code: $written (${getAudioTrackErrorName(written)})")
-                                                // Check if AudioTrack died
-                                                val currentState = audioTrack?.playState
-                                                Log.e("AudioRelay", "AudioTrack playState after error: $currentState")
-                                            } else if (written != null) {
-                                                val expectedBytes = if (isStereo) alignedBytes else alignedBytes / 2
-                                                if (written != expectedBytes) {
-                                                    Log.w("AudioRelay", "AudioTrack wrote $written bytes out of $expectedBytes expected")
+                                    consecutiveErrors = 0 // Reset error counter on successful read
+                                    if (read > 0) {
+                                        // Ensure we write frame-aligned data (critical for Android 12 and older HALs)
+                                        // Input stream is always stereo s16le from ffmpeg
+                                        val alignedBytes = (read / frameSize) * frameSize
+                                        
+                                        if (alignedBytes > 0) {
+                                            try {
+                                                // Use WRITE_BLOCKING only on Android 12 and below for compatibility
+                                                // Android 13+ handles non-blocking writes better
+                                                val writeMode = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                                                    AudioTrack.WRITE_BLOCKING
+                                                } else {
+                                                    AudioTrack.WRITE_NON_BLOCKING
                                                 }
-                                                // Log successful writes periodically
-                                                if (frameCount % 100 == 0) {
-                                                    Log.d("AudioRelay", "Frame $frameCount: Successfully wrote $written bytes (mode=${if (writeMode == AudioTrack.WRITE_BLOCKING) "BLOCKING" else "NON_BLOCKING"})")
+                                                
+                                                val written = if (isStereo) {
+                                                    // Direct write for stereo
+                                                    audioTrack?.write(buffer, 0, alignedBytes, writeMode)
+                                                } else {
+                                                    // Convert stereo to mono by averaging L+R channels
+                                                    val monoBuffer = convertStereoToMono(buffer, alignedBytes)
+                                                    audioTrack?.write(monoBuffer, 0, monoBuffer.size, writeMode)
                                                 }
+                                                
+                                                if (written != null && written < 0) {
+                                                    // Negative return codes indicate errors
+                                                    Log.e("AudioRelay", "AudioTrack.write returned error code: $written (${getAudioTrackErrorName(written)})")
+                                                    // Check if AudioTrack died
+                                                    val currentState = audioTrack?.playState
+                                                    Log.e("AudioRelay", "AudioTrack playState after error: $currentState")
+                                                } else if (written != null) {
+                                                    val expectedBytes = if (isStereo) alignedBytes else alignedBytes / 2
+                                                    if (written != expectedBytes) {
+                                                        Log.w("AudioRelay", "AudioTrack wrote $written bytes out of $expectedBytes expected")
+                                                    }
+                                                    // Log successful writes periodically
+                                                    if (frameCount % 100 == 0) {
+                                                        Log.d("AudioRelay", "Frame $frameCount: Successfully wrote $written bytes (mode=${if (writeMode == AudioTrack.WRITE_BLOCKING) "BLOCKING" else "NON_BLOCKING"})")
+                                                    }
+                                                }
+                                            } catch (wex: Exception) {
+                                                Log.e("AudioRelay", "AudioTrack write exception: ${wex.message}", wex)
                                             }
-                                        } catch (wex: Exception) {
-                                            Log.e("AudioRelay", "AudioTrack write exception: ${wex.message}", wex)
+                                        }
+                                        
+                                        // If we had unaligned bytes, log it (shouldn't happen with TCP stream but good to track)
+                                        if (read != alignedBytes) {
+                                            Log.w("AudioRelay", "Dropped ${read - alignedBytes} unaligned bytes (read=$read, aligned=$alignedBytes)")
                                         }
                                     }
-                                    
-                                    // If we had unaligned bytes, log it (shouldn't happen with TCP stream but good to track)
-                                    if (read != alignedBytes) {
-                                        Log.w("AudioRelay", "Dropped ${read - alignedBytes} unaligned bytes (read=$read, aligned=$alignedBytes)")
-                                    }
-                                }
 
-                                // Broadcast audio levels periodically (every 5 frames ~= 11ms for smoother updates)
-                                if (++frameCount % 5 == 0) {
-                                    val levels = calculateAudioLevels(buffer, read)
-                                    broadcastAudioLevels(levels)
+                                    // Broadcast audio levels periodically (every 5 frames ~= 11ms for smoother updates)
+                                    if (++frameCount % 5 == 0) {
+                                        val levels = calculateAudioLevels(buffer, read)
+                                        broadcastAudioLevels(levels)
+                                    }
+                                } catch (e: java.net.SocketTimeoutException) {
+                                    // Timeout is normal - just continue reading
+                                    // Don't increment error counter for timeouts
+                                    continue
+                                } catch (e: IOException) {
+                                    consecutiveErrors++
+                                    Log.w("AudioRelay", "Read error $consecutiveErrors/5: ${e.message}")
+                                    if (consecutiveErrors >= 5) {
+                                        Log.e("AudioRelay", "Too many consecutive errors, disconnecting client")
+                                        break
+                                    }
                                 }
                             }
                             audioTrack?.stop()
