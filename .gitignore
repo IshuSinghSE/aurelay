@@ -51,6 +51,7 @@ local.properties
 .navigation/
 captures/
 output.json
+.kotlin/
 
 # NDK
 obj/

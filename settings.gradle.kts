@@ -19,7 +19,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AudioRelay"
+rootProject.name = "Aurelay"
 include(":app")
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"

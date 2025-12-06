@@ -29,7 +29,7 @@ android {
                 keystoreProperties.load(FileInputStream(keystorePropertiesFile))
             }
 
-            storeFile = file(keystoreProperties["storeFile"] ?: "flutter-app-key.keystore")
+            storeFile = file(keystoreProperties["storeFile"] ?: "aurelay-release.jks")
             storePassword = keystoreProperties["storePassword"]?.toString()
             keyAlias = keystoreProperties["keyAlias"]?.toString()
             keyPassword = keystoreProperties["keyPassword"]?.toString()
