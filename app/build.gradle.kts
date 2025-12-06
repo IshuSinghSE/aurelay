@@ -15,8 +15,8 @@ android {
         applicationId = "com.devindeed.aurelay"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -46,6 +46,17 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release")
+            
+            // Generate native debug symbols for crash reporting
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
+        }
+        debug {
+            // Also generate symbols for debug builds
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
     compileOptions {

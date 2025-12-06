@@ -12,6 +12,10 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import android.annotation.SuppressLint
 import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
@@ -73,7 +77,7 @@ class AudioRelayService : Service() {
         if (discoveryThread != null && discoveryThread!!.isAlive) return
         discoveryThread = Thread {
             var socket: DatagramSocket? = null
-            try {
+        try {
                 socket = DatagramSocket(DISCOVERY_PORT)
                 socket.broadcast = true
                 val buf = ByteArray(1024)
@@ -287,7 +291,7 @@ class AudioRelayService : Service() {
         // Use a larger buffer than the minimum to avoid underruns with network jitter
         val bufferSizeBytes = maxOf(minBufSize, minBufSize * 4)
 
-            try {
+        try {
                 // --- TLS/Plain socket selection with fallback ---
                 if (useTls) {
                     try {
@@ -338,13 +342,17 @@ class AudioRelayService : Service() {
                 .setSampleRate(sampleRate)
                 .build()
 
-            audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(audioAttributes)
-                .setAudioFormat(audioTrackFormat)
-                .setBufferSizeInBytes(bufferSizeBytes)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                .build()
+                val audioTrackBuilder = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioTrackFormat)
+                    .setBufferSizeInBytes(bufferSizeBytes)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioTrackBuilder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                }
+
+                audioTrack = audioTrackBuilder.build()
 
             // Log AudioTrack state before playing
             Log.i("AudioRelay", "AudioTrack created. State=${audioTrack?.state}, PlayState=${audioTrack?.playState}")
@@ -376,8 +384,14 @@ class AudioRelayService : Service() {
                         client.tcpNoDelay = true // Disable Nagle's algorithm for lower latency
                         client.receiveBufferSize = 4096 // Smaller buffer for lower latency
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
-                        // Update notification with sender name
-                        notificationManager.notify(1, buildNotification())
+                        // Update notification with sender name (check runtime permission on Android 13+)
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                            @SuppressLint("MissingPermission")
+                            notificationManager.notify(1, buildNotification())
+                        } else {
+                            Log.w("AudioRelay", "Missing POST_NOTIFICATIONS permission; skipping notification update")
+                        }
                         // Broadcast connection event so UI can update
                         try {
                             val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
@@ -402,7 +416,7 @@ class AudioRelayService : Service() {
                             
                             // remember connected client
                             try {
-                                lastClientIp = client.inetAddress.hostAddress
+                                  lastClientIp = client.inetAddress.hostAddress ?: ""
                             } catch (ex: Exception) { lastClientIp = "" }
                             
                             while (isServerRunning && consecutiveErrors < 5) {
@@ -484,9 +498,15 @@ class AudioRelayService : Service() {
                             audioTrack?.flush()
                         }
                         Log.i("AudioRelay", "Client disconnected.")
-                        // Clear client info and update notification
+                        // Clear client info and update notification (check permission)
                         lastClientName = ""
-                        notificationManager.notify(1, buildNotification())
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                            @SuppressLint("MissingPermission")
+                            notificationManager.notify(1, buildNotification())
+                        } else {
+                            Log.w("AudioRelay", "Missing POST_NOTIFICATIONS permission; skipping notification update")
+                        }
                         // Broadcast disconnect event so UI can update
                         try {
                             val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")

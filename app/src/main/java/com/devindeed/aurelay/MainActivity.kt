@@ -167,11 +167,8 @@ class MainActivity : ComponentActivity() {
             addAction(ACTION_CONNECTION_REQUEST)
             addAction(AudioRelayService.ACTION_AUDIO_LEVEL)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(connectionReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(connectionReceiver, filter)
-        }
+        // Use ContextCompat.registerReceiver with explicit non-exported flag to satisfy Android U+ requirements
+        ContextCompat.registerReceiver(this, connectionReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         Log.d("MainActivity", "Broadcast receiver registered for CLIENT_CONNECTION")
 
         setContent {
