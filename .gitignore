@@ -51,6 +51,7 @@ local.properties
 .navigation/
 captures/
 output.json
+.kotlin/
 
 # NDK
 obj/
@@ -70,4 +71,9 @@ Thumbs.db
 # temp files
 temp/
 tmp/
-coverage/
+coverage/fastlane/google-play-key.json
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output

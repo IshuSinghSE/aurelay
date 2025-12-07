@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 import org.junit.Test
 

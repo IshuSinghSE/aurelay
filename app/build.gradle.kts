@@ -8,15 +8,15 @@ import java.util.Properties
 import java.io.FileInputStream
 
 android {
-    namespace = "io.github.aurynk.audiorelay"
+    namespace = "com.devindeed.aurelay"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.aurynk.audiorelay"
+        applicationId = "com.devindeed.aurelay"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -29,7 +29,7 @@ android {
                 keystoreProperties.load(FileInputStream(keystorePropertiesFile))
             }
 
-            storeFile = file(keystoreProperties["storeFile"] ?: "flutter-app-key.keystore")
+            storeFile = file(keystoreProperties["storeFile"] ?: "aurelay-release.jks")
             storePassword = keystoreProperties["storePassword"]?.toString()
             keyAlias = keystoreProperties["keyAlias"]?.toString()
             keyPassword = keystoreProperties["keyPassword"]?.toString()
@@ -46,6 +46,17 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release")
+            
+            // Generate native debug symbols for crash reporting
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
+        }
+        debug {
+            // Also generate symbols for debug builds
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
         }
     }
     compileOptions {
@@ -57,6 +68,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

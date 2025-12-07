@@ -1,15 +1,15 @@
-AudioRelay Android App — Minimal README
+# Aurelay Android App — Minimal README
 
-What this is
+## What this is
 - Small Android app that receives a raw PCM audio stream (s16le, 44.1 kHz, stereo) over TCP or TLS and plays it to the device audio output.
 
 Install
 - APK is attached to this repository's GitHub Releases for the AudioRelay app. Download the latest release and install the APK on your Android device.
   - If installing outside Play Store, enable "Install unknown apps" for your installer (e.g., browser or file manager).
 
-Basic usage
+## Basic usage
 1. Start the app on the Android device. It will listen on a configured port (default: 5000).
-2. On your desktop, run the sender (example sender included in the repo under `temp/audioRelay/send_audio.py` or use `aurynk/services/audio_sender.py` from the Aurynk project):
+2. On your desktop, run the sender (example sender included in the repo under `temp/audioRelay/send_audio.py`):
 
 ```sh
 # plain TCP
@@ -41,6 +41,6 @@ Troubleshooting
 - Connection refused: ensure device IP/port are correct, and any firewall on the Android device allows the listening port.
 - TLS errors: double-check certificate files and CA trust.
 
-License & Contact
-- This app is part of the Aurynk project. See the main repository LICENSE for terms.
+## License & Contact
+- This app is an open source project. See the repository LICENSE for terms.
 - For issues or questions, open an issue in the repository.

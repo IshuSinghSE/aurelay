@@ -1,4 +1,4 @@
-package io.github.aurynk.audiorelay
+package com.devindeed.aurelay
 
 //noinspection SuspiciousImport
 import android.R
@@ -12,6 +12,10 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import android.annotation.SuppressLint
 import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
@@ -32,6 +36,7 @@ class AudioRelayService : Service() {
     private lateinit var notificationManager: NotificationManagerCompat
     private var serverThread: Thread? = null
     @Volatile private var lastClientIp: String = ""
+    @Volatile private var lastClientName: String = ""
 
     @Volatile private var isServerRunning = true
     private var serverSocket: ServerSocket? = null
@@ -39,20 +44,20 @@ class AudioRelayService : Service() {
     private var audioTrack: AudioTrack? = null
     
     companion object {
-        const val ACTION_SET_VOLUME = "io.github.aurynk.SET_VOLUME"
+        const val ACTION_SET_VOLUME = "com.devindeed.aurelay.SET_VOLUME"
         const val EXTRA_VOLUME = "volume"
-        const val ACTION_AUDIO_LEVEL = "io.github.aurynk.AUDIO_LEVEL"
+        const val ACTION_AUDIO_LEVEL = "com.devindeed.aurelay.AUDIO_LEVEL"
         const val EXTRA_AUDIO_LEVELS = "audio_levels"
-        const val ACTION_STOP_SERVICE = "io.github.aurynk.STOP_SERVICE"
-        const val ACTION_OPEN_APP = "io.github.aurynk.OPEN_APP"
+        const val ACTION_STOP_SERVICE = "com.devindeed.aurelay.STOP_SERVICE"
+        const val ACTION_OPEN_APP = "com.devindeed.aurelay.OPEN_APP"
 
         // Discovery constants — desktop client will broadcast DISCOVERY_REQUEST
         // and the service will reply with DISCOVERY_RESPONSE;<port>;<name>
         const val DISCOVERY_PORT = 5002
-        const val DISCOVERY_REQUEST = "AURYNK_DISCOVER"
-        const val DISCOVERY_RESPONSE = "AURYNK_RESPONSE"
-        const val CONNECT_REQUEST = "AURYNK_CONNECT"
-        const val DISCONNECT_REQUEST = "AURYNK_DISCONNECT"
+        const val DISCOVERY_REQUEST = "AURELAY_DISCOVER"
+        const val DISCOVERY_RESPONSE = "AURELAY_RESPONSE"
+        const val CONNECT_REQUEST = "AURELAY_CONNECT"
+        const val DISCONNECT_REQUEST = "AURELAY_DISCONNECT"
     }
 
     override fun onCreate() {
@@ -72,7 +77,7 @@ class AudioRelayService : Service() {
         if (discoveryThread != null && discoveryThread!!.isAlive) return
         discoveryThread = Thread {
             var socket: DatagramSocket? = null
-            try {
+        try {
                 socket = DatagramSocket(DISCOVERY_PORT)
                 socket.broadcast = true
                 val buf = ByteArray(1024)
@@ -94,6 +99,8 @@ class AudioRelayService : Service() {
                             try {
                                 val parts = msg.split(";")
                                 val senderName = parts.getOrNull(1) ?: "Android Device"
+                                // Store the sender name for notification updates
+                                lastClientName = senderName
                                 val bcast = Intent(MainActivity.ACTION_CONNECTION_REQUEST)
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("client_ip", packet.address.hostAddress ?: "")
@@ -103,11 +110,11 @@ class AudioRelayService : Service() {
                             } catch (ex: Exception) {
                                 Log.e("AudioRelay", "Failed to broadcast connect request: ${ex.message}", ex)
                             }
-                        } else if (msg.startsWith("AURYNK_ACCEPT")) {
+                        } else if (msg.startsWith("AURELAY_ACCEPT")) {
                             // Connection accepted - could be received by sender OR receiver
                             // If receiver gets this, it means the sender acknowledged the acceptance
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", true)
                                 bcast.putExtra("client_ip", packet.address.hostAddress ?: "")
@@ -116,10 +123,10 @@ class AudioRelayService : Service() {
                             } catch (ex: Exception) {
                                 Log.e("AudioRelay", "Failed to broadcast connection accepted: ${ex.message}", ex)
                             }
-                        } else if (msg.startsWith("AURYNK_REJECT")) {
+                        } else if (msg.startsWith("AURELAY_REJECT")) {
                             // Connection rejected by receiver
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", false)
                                 bcast.putExtra("client_ip", "")
@@ -130,7 +137,7 @@ class AudioRelayService : Service() {
                             }
                         } else if (msg.startsWith(DISCONNECT_REQUEST)) {
                             try {
-                                val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                                val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("connected", false)
                                 bcast.putExtra("client_ip", "")
@@ -204,20 +211,50 @@ class AudioRelayService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
+        // Get sender device name (if connected) or show "Ready to receive"
+        val displayText = if (lastClientName.isNotEmpty()) {
+            "Streaming from $lastClientName"
+        } else {
+            "Ready to receive audio"
+        }
+        
         val builder =
             NotificationCompat.Builder(this, "audioRelayChannel")
-                .setContentTitle("Aurynk")
-                .setContentText("Playing audio from PC")
-                .setSmallIcon(R.drawable.ic_media_play)
+                .setContentTitle("Aurelay")
+                .setContentText(displayText)
+                .setSmallIcon(android.R.drawable.ic_media_play)
                 .setContentIntent(openAppPendingIntent)
-                .addAction(R.drawable.ic_menu_close_clear_cancel, "Disconnect", disconnectPendingIntent)
-                .addAction(R.drawable.ic_menu_preferences, "Open App", openAppPendingIntent)
+                .addAction(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Disconnect",
+                    disconnectPendingIntent
+                )
+                .addAction(
+                    android.R.drawable.ic_menu_preferences,
+                    "Open App",
+                    openAppPendingIntent
+                )
                 .setStyle(
                     androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(mediaSession.sessionToken)
                         .setShowActionsInCompactView(0, 1)
                 )
         return builder.build()
+    }
+    
+    private fun getDeviceName(): String {
+        return try {
+            val manufacturer = Build.MANUFACTURER?.replaceFirstChar { it.uppercase() } ?: ""
+            val model = Build.MODEL ?: "Android Device"
+            
+            when {
+                model.startsWith(manufacturer, ignoreCase = true) -> model
+                manufacturer.isNotEmpty() -> "$manufacturer $model"
+                else -> model
+            }
+        } catch (e: Exception) {
+            "Android Device"
+        }
     }
 
     private fun createNotificationChannel() {
@@ -254,7 +291,7 @@ class AudioRelayService : Service() {
         // Use a larger buffer than the minimum to avoid underruns with network jitter
         val bufferSizeBytes = maxOf(minBufSize, minBufSize * 4)
 
-            try {
+        try {
                 // --- TLS/Plain socket selection with fallback ---
                 if (useTls) {
                     try {
@@ -305,13 +342,17 @@ class AudioRelayService : Service() {
                 .setSampleRate(sampleRate)
                 .build()
 
-            audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(audioAttributes)
-                .setAudioFormat(audioTrackFormat)
-                .setBufferSizeInBytes(bufferSizeBytes)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                .build()
+                val audioTrackBuilder = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioTrackFormat)
+                    .setBufferSizeInBytes(bufferSizeBytes)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioTrackBuilder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                }
+
+                audioTrack = audioTrackBuilder.build()
 
             // Log AudioTrack state before playing
             Log.i("AudioRelay", "AudioTrack created. State=${audioTrack?.state}, PlayState=${audioTrack?.playState}")
@@ -338,10 +379,22 @@ class AudioRelayService : Service() {
                     }
 
                     maybeClient?.use { client ->
+                        // Configure socket for robust streaming
+                        client.soTimeout = 100 // 100ms timeout prevents indefinite blocking
+                        client.tcpNoDelay = true // Disable Nagle's algorithm for lower latency
+                        client.receiveBufferSize = 4096 // Smaller buffer for lower latency
                         Log.i("AudioRelay", "Client connected: ${client.inetAddress.hostAddress}")
+                        // Update notification with sender name (check runtime permission on Android 13+)
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                            @SuppressLint("MissingPermission")
+                            notificationManager.notify(1, buildNotification())
+                        } else {
+                            Log.w("AudioRelay", "Missing POST_NOTIFICATIONS permission; skipping notification update")
+                        }
                         // Broadcast connection event so UI can update
                         try {
-                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                             bcast.setPackage(packageName) // Make it explicit to this app
                             bcast.putExtra("connected", true)
                             bcast.putExtra("client_ip", client.inetAddress.hostAddress)
@@ -351,85 +404,112 @@ class AudioRelayService : Service() {
                             Log.e("AudioRelay", "Failed to broadcast client connected: ${ex.message}", ex)
                         }
                         client.getInputStream().use { `in` ->
-                            val buffer = ByteArray(minBufSize)
+                            val buffer = ByteArray(4096) // Reduced from minBufSize for lower latency
                             var read: Int
                             var frameCount = 0
+                            var consecutiveErrors = 0
                             val frameSize = 4 // Input is always stereo: 2 bytes per sample (16-bit) * 2 channels
                             val outputFrameSize = if (isStereo) 4 else 2 // Output frame size depends on AudioTrack config
                             
                             // Log buffer configuration for diagnostics
-                            Log.d("AudioRelay", "minBufSize=$minBufSize, bufferSizeBytes=$bufferSizeBytes, frameSize=$frameSize, outputMode=${if (isStereo) "STEREO" else "MONO"}")
+                            Log.d("AudioRelay", "buffer=4096 bytes, bufferSizeBytes=$bufferSizeBytes, frameSize=$frameSize, outputMode=${if (isStereo) "STEREO" else "MONO"}")
                             
                             // remember connected client
                             try {
-                                lastClientIp = client.inetAddress.hostAddress
+                                  lastClientIp = client.inetAddress.hostAddress ?: ""
                             } catch (ex: Exception) { lastClientIp = "" }
                             
-                            while (`in`.read(buffer).also { read = it } != -1 && isServerRunning) {
-                                if (read > 0) {
-                                    // Ensure we write frame-aligned data (critical for Android 12 and older HALs)
-                                    // Input stream is always stereo s16le from ffmpeg
-                                    val alignedBytes = (read / frameSize) * frameSize
+                            while (isServerRunning && consecutiveErrors < 5) {
+                                try {
+                                    read = `in`.read(buffer)
+                                    if (read == -1) break // End of stream
                                     
-                                    if (alignedBytes > 0) {
-                                        try {
-                                            // Use WRITE_BLOCKING only on Android 12 and below for compatibility
-                                            // Android 13+ handles non-blocking writes better
-                                            val writeMode = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
-                                                AudioTrack.WRITE_BLOCKING
-                                            } else {
-                                                AudioTrack.WRITE_NON_BLOCKING
-                                            }
-                                            
-                                            val written = if (isStereo) {
-                                                // Direct write for stereo
-                                                audioTrack?.write(buffer, 0, alignedBytes, writeMode)
-                                            } else {
-                                                // Convert stereo to mono by averaging L+R channels
-                                                val monoBuffer = convertStereoToMono(buffer, alignedBytes)
-                                                audioTrack?.write(monoBuffer, 0, monoBuffer.size, writeMode)
-                                            }
-                                            
-                                            if (written != null && written < 0) {
-                                                // Negative return codes indicate errors
-                                                Log.e("AudioRelay", "AudioTrack.write returned error code: $written (${getAudioTrackErrorName(written)})")
-                                                // Check if AudioTrack died
-                                                val currentState = audioTrack?.playState
-                                                Log.e("AudioRelay", "AudioTrack playState after error: $currentState")
-                                            } else if (written != null) {
-                                                val expectedBytes = if (isStereo) alignedBytes else alignedBytes / 2
-                                                if (written != expectedBytes) {
-                                                    Log.w("AudioRelay", "AudioTrack wrote $written bytes out of $expectedBytes expected")
+                                    consecutiveErrors = 0 // Reset error counter on successful read
+                                    if (read > 0) {
+                                        // Ensure we write frame-aligned data (critical for Android 12 and older HALs)
+                                        // Input stream is always stereo s16le from ffmpeg
+                                        val alignedBytes = (read / frameSize) * frameSize
+                                        
+                                        if (alignedBytes > 0) {
+                                            try {
+                                                // Use WRITE_BLOCKING only on Android 12 and below for compatibility
+                                                // Android 13+ handles non-blocking writes better
+                                                val writeMode = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+                                                    AudioTrack.WRITE_BLOCKING
+                                                } else {
+                                                    AudioTrack.WRITE_NON_BLOCKING
                                                 }
-                                                // Log successful writes periodically
-                                                if (frameCount % 100 == 0) {
-                                                    Log.d("AudioRelay", "Frame $frameCount: Successfully wrote $written bytes (mode=${if (writeMode == AudioTrack.WRITE_BLOCKING) "BLOCKING" else "NON_BLOCKING"})")
+                                                
+                                                val written = if (isStereo) {
+                                                    // Direct write for stereo
+                                                    audioTrack?.write(buffer, 0, alignedBytes, writeMode)
+                                                } else {
+                                                    // Convert stereo to mono by averaging L+R channels
+                                                    val monoBuffer = convertStereoToMono(buffer, alignedBytes)
+                                                    audioTrack?.write(monoBuffer, 0, monoBuffer.size, writeMode)
                                                 }
+                                                
+                                                if (written != null && written < 0) {
+                                                    // Negative return codes indicate errors
+                                                    Log.e("AudioRelay", "AudioTrack.write returned error code: $written (${getAudioTrackErrorName(written)})")
+                                                    // Check if AudioTrack died
+                                                    val currentState = audioTrack?.playState
+                                                    Log.e("AudioRelay", "AudioTrack playState after error: $currentState")
+                                                } else if (written != null) {
+                                                    val expectedBytes = if (isStereo) alignedBytes else alignedBytes / 2
+                                                    if (written != expectedBytes) {
+                                                        Log.w("AudioRelay", "AudioTrack wrote $written bytes out of $expectedBytes expected")
+                                                    }
+                                                    // Log successful writes periodically
+                                                    if (frameCount % 100 == 0) {
+                                                        Log.d("AudioRelay", "Frame $frameCount: Successfully wrote $written bytes (mode=${if (writeMode == AudioTrack.WRITE_BLOCKING) "BLOCKING" else "NON_BLOCKING"})")
+                                                    }
+                                                }
+                                            } catch (wex: Exception) {
+                                                Log.e("AudioRelay", "AudioTrack write exception: ${wex.message}", wex)
                                             }
-                                        } catch (wex: Exception) {
-                                            Log.e("AudioRelay", "AudioTrack write exception: ${wex.message}", wex)
+                                        }
+                                        
+                                        // If we had unaligned bytes, log it (shouldn't happen with TCP stream but good to track)
+                                        if (read != alignedBytes) {
+                                            Log.w("AudioRelay", "Dropped ${read - alignedBytes} unaligned bytes (read=$read, aligned=$alignedBytes)")
                                         }
                                     }
-                                    
-                                    // If we had unaligned bytes, log it (shouldn't happen with TCP stream but good to track)
-                                    if (read != alignedBytes) {
-                                        Log.w("AudioRelay", "Dropped ${read - alignedBytes} unaligned bytes (read=$read, aligned=$alignedBytes)")
-                                    }
-                                }
 
-                                // Broadcast audio levels periodically (every 5 frames ~= 11ms for smoother updates)
-                                if (++frameCount % 5 == 0) {
-                                    val levels = calculateAudioLevels(buffer, read)
-                                    broadcastAudioLevels(levels)
+                                    // Broadcast audio levels periodically (every 5 frames ~= 11ms for smoother updates)
+                                    if (++frameCount % 5 == 0) {
+                                        val levels = calculateAudioLevels(buffer, read)
+                                        broadcastAudioLevels(levels)
+                                    }
+                                } catch (e: java.net.SocketTimeoutException) {
+                                    // Timeout is normal - just continue reading
+                                    // Don't increment error counter for timeouts
+                                    continue
+                                } catch (e: IOException) {
+                                    consecutiveErrors++
+                                    Log.w("AudioRelay", "Read error $consecutiveErrors/5: ${e.message}")
+                                    if (consecutiveErrors >= 5) {
+                                        Log.e("AudioRelay", "Too many consecutive errors, disconnecting client")
+                                        break
+                                    }
                                 }
                             }
                             audioTrack?.stop()
                             audioTrack?.flush()
                         }
                         Log.i("AudioRelay", "Client disconnected.")
+                        // Clear client info and update notification (check permission)
+                        lastClientName = ""
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                            @SuppressLint("MissingPermission")
+                            notificationManager.notify(1, buildNotification())
+                        } else {
+                            Log.w("AudioRelay", "Missing POST_NOTIFICATIONS permission; skipping notification update")
+                        }
                         // Broadcast disconnect event so UI can update
                         try {
-                            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+                            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
                             bcast.setPackage(packageName) // Make it explicit to this app
                             bcast.putExtra("connected", false)
                             bcast.putExtra("client_ip", "")
@@ -568,13 +648,14 @@ class AudioRelayService : Service() {
         }
         // Ensure UI knows we're disconnected when service stops
         try {
-            val bcast = Intent("io.github.aurynk.CLIENT_CONNECTION")
+            val bcast = Intent("com.devindeed.aurelay.CLIENT_CONNECTION")
             bcast.setPackage(packageName)
             bcast.putExtra("connected", false)
             bcast.putExtra("client_ip", "")
             sendBroadcast(bcast)
             Log.i("AudioRelay", "Broadcast sent from onDestroy: CLIENT_CONNECTION connected=false")
             lastClientIp = ""
+            lastClientName = ""
         } catch (ex: Exception) {
             Log.e("AudioRelay", "Failed to broadcast disconnection on destroy: ${ex.message}", ex)
         }
