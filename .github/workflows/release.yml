@@ -1,5 +1,8 @@
 name: Android Release Build and Deploy
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -144,40 +147,74 @@ jobs:
           echo "Renaming $APK_PATH -> $DEST"
           mv "$APK_PATH" "$DEST"
 
-      - name: Create Release Notes
-        id: release_notes
-        run: |
-          cat > release_notes.md << 'EOF'
-          ## Aurelay v${{ steps.extract_version.outputs.VERSION_NAME }}
-          
-          ### Changes
-          - Auto-generated release from PR merge
-          - Version Code: ${{ steps.extract_version.outputs.VERSION_CODE }}
-          
-          ### Installation
-          Download and install the APK below on your Android device.
-          
-          **Minimum Android Version:** Android 7.0 (API 24)
-          **Target Android Version:** Android 14 (API 36)
-          
-          ### Verification
-          After installation, verify the app signature matches the one shown in the repository.
-          EOF
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
-          cat release_notes.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Get Changelog Entry
+        id: changelog_reader
+        uses: mind-doc/changelog-reader-action@v2
         with:
-          tag_name: v${{ steps.extract_version.outputs.VERSION_NAME }}
-          name: Aurelay v${{ steps.extract_version.outputs.VERSION_NAME }}
-          body_path: release_notes.md
-          files: |
-            app/build/outputs/apk/release/aurelay-v${{ steps.extract_version.outputs.VERSION_NAME }}.apk
-            app/build/outputs/bundle/release/app-release.aab
+          version: ${{ github.ref_name }}
+          path: ./CHANGELOG.md
+
+      - name: Compute previous tag and compare URL
+        id: prev_tag
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          CUR="${CURRENT_TAG}"
+          if [ -z "$CUR" ]; then
+            CUR="v${{ steps.extract_version.outputs.VERSION_NAME }}"
+          fi
+          PREV=$(git tag --list 'v*' --sort=-v:refname | grep -v "^${CUR}$" | head -n1 || true)
+          if [ -z "$PREV" ]; then
+            echo "prev=" >> $GITHUB_OUTPUT
+            echo "compare_url=" >> $GITHUB_OUTPUT
+            echo "No previous tag found; compare_url left empty"
+          else
+            COMPARE_URL="https://github.com/IshuSinghSE/AudioRelay/compare/${PREV}...${CUR}"
+            echo "prev=$PREV" >> $GITHUB_OUTPUT
+            echo "compare_url=$COMPARE_URL" >> $GITHUB_OUTPUT
+            echo "Computed compare url: $COMPARE_URL"
+          fi
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Create GitHub Release (from CHANGELOG)
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Aurelay ${{ github.ref_name }}
+          body: |
+            ${{ steps.changelog_reader.outputs.changes }}
+
+            **Full Changelog:** https://github.com/IshuSinghSE/AudioRelay/compare/v1.0.0...${{ github.ref_name }}
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release Assets (if present)
+        run: |
+          set -euo pipefail
+          TAG=v${{ steps.extract_version.outputs.VERSION_NAME }}
+          APK=app/build/outputs/apk/release/aurelay-v${{ steps.extract_version.outputs.VERSION_NAME }}.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          echo "Installing gh CLI"
+          sudo apt-get update
+          sudo apt-get install -y gh
+          echo "Authenticating gh using GITHUB_TOKEN"
+          echo "$GITHUB_TOKEN" | gh auth login --with-token
+          if [ -f "$APK" ]; then
+            echo "Uploading APK: $APK"
+            gh release upload "$TAG" "$APK" --clobber || true
+          else
+            echo "APK not found: $APK"
+          fi
+          if [ -f "$AAB" ]; then
+            echo "Uploading AAB: $AAB"
+            gh release upload "$TAG" "$AAB" --clobber || true
+          else
+            echo "AAB not found: $AAB"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
