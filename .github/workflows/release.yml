@@ -49,7 +49,9 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_FILE }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > aurelay-release.jks
+          # Put keystore inside the app module so the signing config can find it
+          mkdir -p app
+          echo "$KEYSTORE_BASE64" | base64 -d > app/aurelay-release.jks
 
       - name: Create key.properties
         env:
@@ -61,7 +63,8 @@ jobs:
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=$KEY_PASSWORD
           keyAlias=$KEY_ALIAS
-          storeFile=aurelay-release.jks
+          # Point to the keystore inside the app module
+          storeFile=app/aurelay-release.jks
           EOF
 
       - name: Extract version from build.gradle.kts
@@ -169,7 +172,7 @@ jobs:
       - name: Cleanup Sensitive Files
         if: always()
         run: |
-          rm -f aurelay-release.jks
+          rm -f app/aurelay-release.jks
           rm -f key.properties
           rm -f play-store-key.json
 
