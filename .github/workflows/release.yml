@@ -63,8 +63,10 @@ jobs:
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=$KEY_PASSWORD
           keyAlias=$KEY_ALIAS
-          # Point to the keystore inside the app module
-          storeFile=app/aurelay-release.jks
+          # Keystore file name relative to the `app/` module directory.
+          # When evaluated inside `app/build.gradle.kts`, `file("aurelay-release.jks")`
+          # resolves to `app/aurelay-release.jks` (so do NOT prefix with `app/`).
+          storeFile=aurelay-release.jks
           EOF
 
       - name: Extract version from build.gradle.kts
