@@ -147,9 +147,9 @@ jobs:
           echo "Renaming $APK_PATH -> $DEST"
           mv "$APK_PATH" "$DEST"
 
-      - name: Get Changelog Entry
+      - name: Changelog Reader
         id: changelog_reader
-        uses: mind-doc/changelog-reader-action@v2
+        uses: mindsers/changelog-reader-action@v2.2.3
         with:
           version: ${{ github.ref_name }}
           path: ./CHANGELOG.md
