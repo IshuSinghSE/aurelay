@@ -1,4 +1,4 @@
-name: Android Release Build and Deploy
+name: Release & Publish
 
 permissions:
   contents: write
@@ -10,26 +10,22 @@ on:
   workflow_dispatch:
     inputs:
       deploy_to_playstore:
-        description: 'Deploy to Play Store'
+        description: 'Force Deploy to Play Store?'
         required: true
         type: boolean
         default: false
       track:
-        description: 'Play Store Track (internal/beta/production)'
+        description: 'Track (internal/alpha/beta/production)'
         required: true
         type: choice
         options:
           - internal
-          - beta
+          - alpha
           - production
         default: 'internal'
 
 jobs:
   release:
-    # Only run for pushed tags matching v* or manual trigger
-    if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     
     steps:
@@ -37,6 +33,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 1. 🧠 SMART LOGIC: Detect if this is a Pre-release (RC) or Production
+      - name: Check Tag Type
+        id: check_tag
+        run: |
+          # If triggered by tag and contains a dash (e.g. v1.2.0-rc1), it is PRE-RELEASE
+          if [[ "${{ github.ref_name }}" == *-* ]] && [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
+            echo "Status: Pre-release (RC/Fix detected)"
+          else
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
+            echo "Status: Production Release"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -48,11 +57,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # 2. 🔐 KEYSTORE: Preserving your exact setup
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_FILE }}
         run: |
-          # Put keystore inside the app module so the signing config can find it
           mkdir -p app
           echo "$KEYSTORE_BASE64" | base64 -d > app/aurelay-release.jks
 
@@ -66,222 +75,60 @@ jobs:
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=$KEY_PASSWORD
           keyAlias=$KEY_ALIAS
-          # Keystore file name relative to the `app/` module directory.
-          # When evaluated inside `app/build.gradle.kts`, `file("aurelay-release.jks")`
-          # resolves to `app/aurelay-release.jks` (so do NOT prefix with `app/`).
           storeFile=aurelay-release.jks
           EOF
 
-      - name: Extract version from build.gradle.kts
-        id: extract_version
-        run: |
-          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)".*/\1/')
-          VERSION_CODE=$(grep 'versionCode' app/build.gradle.kts | sed 's/.*versionCode = \(.*\)/\1/')
-          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION_NAME ($VERSION_CODE)"
-
-      - name: Install Android cmdline-tools + build-tools
-        run: |
-          set -euo pipefail
-          ANDROID_SDK_ROOT="$HOME/android-sdk"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O /tmp/cmdline-tools.zip
-          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
-          # Install platform and multiple build-tools versions to match local environment
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-36" \
-            "build-tools;36.1.0" "build-tools;35.0.0" "build-tools;34.0.0"
-
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Build Release AAB
-        run: ./gradlew bundleRelease
-
-      - name: Sign APK
-        run: |
-          echo "APK already signed during build"
-          ls -lh app/build/outputs/apk/release/
-
-      - name: Verify APK Signature
-        run: |
-          set -euo pipefail
-          echo "Listing APK output dir for debugging:"
-          ls -la app/build/outputs/apk/release || true
-          APK_PATH=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1 || true)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK found at app/build/outputs/apk/release/*.apk — skipping apksigner verify"
-            exit 0
-          fi
-          echo "Found APK: $APK_PATH"
-          ANDROID_SDK_ROOT="$HOME/android-sdk"
-          # Select the newest installed build-tools directory and use its apksigner
-          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_SDK_ROOT/build-tools"/* 2>/dev/null | sort -V | tail -n1 || true)
-          if [ -z "$BUILD_TOOLS_DIR" ]; then
-            echo "No build-tools installation found under $ANDROID_SDK_ROOT/build-tools"
-            ls -la "$ANDROID_SDK_ROOT" || true
-            exit 1
-          fi
-          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
-          if [ ! -x "$APKSIGNER" ]; then
-            echo "apksigner not found at $APKSIGNER"
-            echo "Listing $BUILD_TOOLS_DIR:"
-            ls -la "$BUILD_TOOLS_DIR" || true
-            exit 1
-          fi
-          echo "Using apksigner: $APKSIGNER"
-          "$APKSIGNER" verify --verbose "$APK_PATH"
-
-      - name: Rename APK
-        run: |
-          APK_PATH=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1 || true)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK to rename; skipping"
-            exit 0
-          fi
-          DEST=app/build/outputs/apk/release/aurelay-v${{ steps.extract_version.outputs.VERSION_NAME }}.apk
-          echo "Renaming $APK_PATH -> $DEST"
-          mv "$APK_PATH" "$DEST"
-
-      - name: Changelog Reader
+      # 3. 📝 CHANGELOG: Reads the exact section for this tag from CHANGELOG.md
+      - name: Read Changelog
         id: changelog_reader
         uses: mindsers/changelog-reader-action@v2.2.3
         with:
           version: ${{ github.ref_name }}
           path: ./CHANGELOG.md
+        continue-on-error: true # Prevents failure if you forget to update changelog for a quick RC fix
 
-      - name: Compute previous tag and compare URL
-        id: prev_tag
-        run: |
-          set -euo pipefail
-          git fetch --tags
-          CUR="${CURRENT_TAG}"
-          if [ -z "$CUR" ]; then
-            CUR="v${{ steps.extract_version.outputs.VERSION_NAME }}"
-          fi
-          PREV=$(git tag --list 'v*' --sort=-v:refname | grep -v "^${CUR}$" | head -n1 || true)
-          if [ -z "$PREV" ]; then
-            echo "prev=" >> $GITHUB_OUTPUT
-            echo "compare_url=" >> $GITHUB_OUTPUT
-            echo "No previous tag found; compare_url left empty"
-          else
-            COMPARE_URL="https://github.com/IshuSinghSE/AudioRelay/compare/${PREV}...${CUR}"
-            echo "prev=$PREV" >> $GITHUB_OUTPUT
-            echo "compare_url=$COMPARE_URL" >> $GITHUB_OUTPUT
-            echo "Computed compare url: $COMPARE_URL"
-          fi
-        env:
-          CURRENT_TAG: ${{ github.ref_name }}
+      # 4. 🏗️ BUILD: Create the Bundle (AAB)
+      - name: Build Release AAB
+        run: ./gradlew bundleRelease
 
-      - name: Create GitHub Release (from CHANGELOG)
-        id: create_release
-        uses: actions/create-release@v1
+      # 5. 📦 GITHUB RELEASE: Handles Assets + Prerelease logic automatically
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          release_name: Aurelay ${{ github.ref_name }}
-          body: |
-            ${{ steps.changelog_reader.outputs.changes }}
-
-            **Full Changelog:** https://github.com/IshuSinghSE/AudioRelay/compare/v1.0.0...${{ github.ref_name }}
+          name: Aurelay ${{ github.ref_name }}
+          # Use changelog if found, otherwise default text
+          body: ${{ steps.changelog_reader.outputs.changes || 'Automated Release Build' }}
+          files: |
+            app/build/outputs/bundle/release/app-release.aab
           draft: false
-          prerelease: false
+          # Automatically marks as "Pre-release" if it's an RC tag
+          prerelease: ${{ steps.check_tag.outputs.IS_PRERELEASE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Release Assets (if present)
-        run: |
-          set -euo pipefail
-          TAG="${{ github.ref_name }}"
-          APK=app/build/outputs/apk/release/aurelay-v${{ steps.extract_version.outputs.VERSION_NAME }}.apk
-          AAB=app/build/outputs/bundle/release/app-release.aab
-          
-          echo "Installing gh CLI"
-          sudo apt-get update -qq
-          sudo apt-get install -y gh
-          
-          echo "Authenticating gh using GITHUB_TOKEN"
-          echo "$GITHUB_TOKEN" | gh auth login --with-token
-          
-          echo "Checking release status for tag: $TAG"
-          gh release view "$TAG" || {
-            echo "Release not found for tag $TAG"
-            exit 1
-          }
-          
-          echo "Listing build outputs:"
-          ls -lah app/build/outputs/apk/release/ || true
-          ls -lah app/build/outputs/bundle/release/ || true
-          
-          if [ -f "$APK" ]; then
-            echo "Uploading APK: $APK"
-            gh release upload "$TAG" "$APK" --clobber
-          else
-            echo "Warning: APK not found: $APK"
-          fi
-          
-          if [ -f "$AAB" ]; then
-            echo "Uploading AAB: $AAB"
-            gh release upload "$TAG" "$AAB" --clobber
-          else
-            echo "Warning: AAB not found: $AAB"
-          fi
-          
-          echo "Upload complete"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Ruby for Fastlane
+      # 6. 🚀 PLAY STORE: Only runs if NOT pre-release OR forced via manual trigger
+      - name: Upload to Play Store
         if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_playstore == 'true') ||
-          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'deploy-playstore'))
-        uses: ruby/setup-ruby@v1
+          (steps.check_tag.outputs.IS_PRERELEASE == 'false') || 
+          (github.event_name == 'workflow_dispatch' && inputs.deploy_to_playstore == true)
+        uses: r0adkll/upload-google-play@v1
         with:
-          ruby-version: '3.2'
-          bundler-cache: false
+          # We use your existing secret, just mapped to the new action input
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_JSON_KEY }}
+          packageName: com.devindeed.aurelay
+          releaseFiles: app/build/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.track || 'internal' }}
+          status: completed
+          releaseName: ${{ github.ref_name }}
+          # Uses the same changelog text for the Play Store "What's New" section
+          whatsNewDirectory: distribution/whatsnew 
+          # Or map text directly if prefered, but directory is standard for this action. 
+          # For simplicity, we can let it use the GitHub body or skip mapping notes if folder is missing.
 
-      - name: Install Fastlane
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_playstore == 'true') ||
-          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'deploy-playstore'))
-        run: |
-          gem install fastlane -N
-          fastlane --version
-
-      - name: Create Play Store JSON Key
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_playstore == 'true') ||
-          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'deploy-playstore'))
-        env:
-          PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
-        run: |
-          echo "$PLAY_STORE_JSON_KEY" > play-store-key.json
-
-      - name: Deploy to Play Store
-        if: |
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_playstore == 'true') ||
-          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'deploy-playstore'))
-        env:
-          SUPPLY_JSON_KEY: ./play-store-key.json
-        run: |
-          TRACK="${{ github.event.inputs.track || 'internal' }}"
-          fastlane android $TRACK
-
-      - name: Cleanup Sensitive Files
+      # 7. 🧹 CLEANUP
+      - name: Cleanup Secrets
         if: always()
         run: |
           rm -f app/aurelay-release.jks
           rm -f key.properties
-          rm -f play-store-key.json
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts-v${{ steps.extract_version.outputs.VERSION_NAME }}
-          path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
-          retention-days: 30
