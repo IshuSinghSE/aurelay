@@ -78,6 +78,21 @@ jobs:
           echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "Version: $VERSION_NAME ($VERSION_CODE)"
 
+      - name: Install Android cmdline-tools + build-tools
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O /tmp/cmdline-tools.zip
+          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+          # Install platform and multiple build-tools versions to match local environment
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-36" \
+            "build-tools;36.1.0" "build-tools;35.0.0" "build-tools;34.0.0"
+
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
@@ -92,25 +107,31 @@ jobs:
       - name: Verify APK Signature
         run: |
           set -euo pipefail
+          echo "Listing APK output dir for debugging:"
+          ls -la app/build/outputs/apk/release || true
           APK_PATH=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1 || true)
           if [ -z "$APK_PATH" ]; then
             echo "No APK found at app/build/outputs/apk/release/*.apk — skipping apksigner verify"
             exit 0
           fi
           echo "Found APK: $APK_PATH"
-          sudo apt-get update
-          sudo apt-get install -y wget unzip
           ANDROID_SDK_ROOT="$HOME/android-sdk"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          cd "$HOME"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools"/* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-          # Verify APK signature using apksigner from the installed build-tools
-          "$ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner" verify --verbose "$APK_PATH"
+          # Select the newest installed build-tools directory and use its apksigner
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_SDK_ROOT/build-tools"/* 2>/dev/null | sort -V | tail -n1 || true)
+          if [ -z "$BUILD_TOOLS_DIR" ]; then
+            echo "No build-tools installation found under $ANDROID_SDK_ROOT/build-tools"
+            ls -la "$ANDROID_SDK_ROOT" || true
+            exit 1
+          fi
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then
+            echo "apksigner not found at $APKSIGNER"
+            echo "Listing $BUILD_TOOLS_DIR:"
+            ls -la "$BUILD_TOOLS_DIR" || true
+            exit 1
+          fi
+          echo "Using apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --verbose "$APK_PATH"
 
       - name: Rename APK
         run: |
