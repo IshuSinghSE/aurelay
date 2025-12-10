@@ -5,6 +5,10 @@ import androidx.appcompat.app.AppCompatActivity
 import com.devindeed.aurelay.R
 import com.devindeed.aurelay.ads.AdsManager
 import com.devindeed.aurelay.iap.BillingManager
+import com.devindeed.aurelay.iap.PurchaseManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import com.google.android.gms.ads.AdView
 
 class IapAdsActivity : AppCompatActivity() {
@@ -22,9 +26,16 @@ class IapAdsActivity : AppCompatActivity() {
         val adView = findViewById<AdView>(R.id.adView)
         AdsManager.loadBanner(adView)
 
+        // Wire mock PurchaseManager: hide ads for premium users
+        lifecycleScope.launch {
+            PurchaseManager.isPremium.collectLatest { premium ->
+                adView.visibility = if (premium) android.view.View.GONE else android.view.View.VISIBLE
+            }
+        }
+
         findViewById(android.R.id.content).rootView.findViewById<android.widget.Button>(R.id.btn_purchase_remove_ads)?.setOnClickListener {
-            // Replace with your product id
-            billingManager.purchaseRemoveAds(this, "remove_ads_product_id")
+            // For now, use the mock buy flow to toggle premium locally
+            PurchaseManager.buyPremium()
         }
     }
 
