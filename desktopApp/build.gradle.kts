@@ -57,11 +57,25 @@ tasks.register<Exec>("cargoBuild") {
             println("Copied $libName to resources")
 
             // Generate bindings
-            // We need to run uniffi-bindgen from cargo
-            // Note: This blocks the main thread, which is fine for a build task
-            exec {
-                workingDir = rustDir
-                commandLine("cargo", "run", "--features=uniffi/cli", "--bin", "uniffi-bindgen", "generate", "--library", source.absolutePath, "--language", "kotlin", "--out-dir", kotlinOutDir.absolutePath)
+            // Prefer invoking the `uniffi-bindgen` CLI directly when available.
+            // If it's not on PATH, instruct the user to install it (e.g. `cargo install uniffi-bindgen`).
+            val generateCmd = listOf("uniffi-bindgen", "generate", "--library", source.absolutePath, "--language", "kotlin", "--out-dir", kotlinOutDir.absolutePath)
+
+            try {
+                val result = exec {
+                    workingDir = rustDir
+                    isIgnoreExitValue = true
+                    commandLine(generateCmd)
+                }
+
+                if (result.exitValue != 0) {
+                    logger.warn("Couldn't run 'uniffi-bindgen' to generate Kotlin bindings (exit=${result.exitValue}).")
+                    logger.warn("Install the CLI with `cargo install uniffi-bindgen` and ensure it's on your PATH, or generate bindings manually.")
+                    logger.warn("Continuing build with fallback Kotlin stubs (if present).")
+                }
+            } catch (e: Exception) {
+                logger.warn("Failed to start 'uniffi-bindgen' process: ${e.message}")
+                logger.warn("Skipping UniFFI binding generation; continuing with fallback Kotlin stubs (if present).")
             }
 
             println("Generated Kotlin bindings")
