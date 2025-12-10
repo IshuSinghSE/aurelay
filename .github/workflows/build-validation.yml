@@ -24,6 +24,12 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Verify Java and stop Gradle daemons
+        run: |
+          echo "java version:" && java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          ./gradlew --stop || true
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
