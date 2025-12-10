@@ -30,6 +30,20 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME"
           ./gradlew --stop || true
 
+      - name: Pin Gradle Java home to runner JDK
+        run: |
+          echo "Ensuring gradle.properties points to runner JAVA_HOME: $JAVA_HOME"
+          if [ -f gradle.properties ]; then
+            if grep -q '^org.gradle.java.home=' gradle.properties; then
+              sed -i "s|^org.gradle.java.home=.*|org.gradle.java.home=${JAVA_HOME}|" gradle.properties
+            else
+              echo "org.gradle.java.home=${JAVA_HOME}" >> gradle.properties
+            fi
+          else
+            echo "org.gradle.java.home=${JAVA_HOME}" > gradle.properties
+          fi
+          ./gradlew --stop || true
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
