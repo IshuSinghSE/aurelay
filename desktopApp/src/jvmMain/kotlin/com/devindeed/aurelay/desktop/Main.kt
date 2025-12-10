@@ -36,6 +36,8 @@ fun App() {
     var showDeviceDialog by remember { mutableStateOf(false) }
     var backend by remember { mutableStateOf("Native") }
     var ffmpegProcess by remember { mutableStateOf<Process?>(null) }
+    var nativeLogs by remember { mutableStateOf("") }
+    var showNativeLog by remember { mutableStateOf(false) }
 
     // Start FFmpeg fallback via Rust (spawns `ffmpeg` from native code and pipes to TCP)
     fun startFFmpegStream(host: String, port: String, device: String?) {
@@ -109,6 +111,21 @@ fun App() {
                     )
 
                     Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(onClick = {
+                        // List CPAL devices via native call
+                        thread(start = true) {
+                            try {
+                                val list = uniffi.rust_engine.listCpalInputDevices()
+                                availableDevices = list
+                                showDeviceDialog = true
+                            } catch (e: Exception) {
+                                statusMessage = "Failed to list CPAL devices: ${'$'}{e.message}"
+                            }
+                        }
+                    }, enabled = !isStreaming) {
+                        Text("List CPAL")
+                    }
 
                     Button(onClick = {
                         // Refresh device list using `pactl list short sources` in background
@@ -309,11 +326,37 @@ fun App() {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = "Status: ${'$'}statusMessage",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (isStreaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Status: ${'$'}statusMessage",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isStreaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = {
+                        // Refresh native logs
+                        thread(start = true) {
+                            try {
+                                nativeLogs = uniffi.rust_engine.getNativeLogs()
+                                showNativeLog = true
+                            } catch (e: Exception) {
+                                statusMessage = "Failed to fetch native logs: ${'$'}{e.message}"
+                            }
+                        }
+                    }) {
+                        Text("Show Logs")
+                    }
+                }
+
+                if (showNativeLog) {
+                    AlertDialog(onDismissRequest = { showNativeLog = false }, title = { Text("Native Logs") }, text = {
+                        Column(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                            Text(nativeLogs)
+                        }
+                    }, confirmButton = { TextButton(onClick = { showNativeLog = false }) { Text("Close") } })
+                }
             }
         }
     }

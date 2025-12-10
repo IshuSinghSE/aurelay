@@ -19,6 +19,8 @@ private interface NativeLib : Library {
     fun start_stream_with_device_c(host: String?, device: String?): Int
     fun start_ffmpeg_stream_c(host: String?, port: Int, device: String?): Int
     fun stop_ffmpeg_stream_c(): Int
+    fun get_native_logs_c(out_ptr: Pointer?, out_len: Long): Int
+    fun list_cpal_input_devices_c(out_ptr: Pointer?, out_len: Long): Int
 }
 
 private object RustNative {
@@ -136,4 +138,26 @@ fun requestConnectAndWait(host: String, timeoutSecs: Long = 10, deviceName: Stri
     if (rc != 0) return "timeout"
     val s = mem.getString(0)
     return s.ifBlank { "timeout" }
+}
+
+fun getNativeLogs(): String {
+    val lib = RustNative.INSTANCE ?: return ""
+    val bufLen = 64 * 1024L
+    val mem = Memory(bufLen)
+    mem.clear()
+    val rc = lib.get_native_logs_c(mem, bufLen)
+    if (rc != 0) return ""
+    return mem.getString(0)
+}
+
+fun listCpalInputDevices(): List<String> {
+    val lib = RustNative.INSTANCE ?: return emptyList()
+    val bufLen = 64 * 1024L
+    val mem = Memory(bufLen)
+    mem.clear()
+    val rc = lib.list_cpal_input_devices_c(mem, bufLen)
+    if (rc != 0) return emptyList()
+    val s = mem.getString(0)
+    if (s.isBlank()) return emptyList()
+    return s.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
 }

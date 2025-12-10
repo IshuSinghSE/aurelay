@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::process::{Command, Child, Stdio};
+use std::process::{Command, Stdio};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
@@ -90,6 +90,7 @@ pub fn discover_receivers(timeout_secs: u64) -> Vec<String> {
                         let name = parts[2];
                         let entry = format!("{}:{};{}", src.ip(), port, name);
                         if !results.contains(&entry) {
+                            push_log(&format!("Discovered: {}", entry));
                             results.push(entry);
                         }
                     }
@@ -145,9 +146,11 @@ pub fn request_connect_and_wait(host: String, timeout_secs: u64, device_name: St
                 let text = String::from_utf8_lossy(&buf[..n]).to_string();
                 if text.starts_with("AURELAY_ACCEPT") {
                     println!("Connection ACCEPTED by {}", src.ip());
+                    push_log(&format!("Connection ACCEPTED by {}", src.ip()));
                     return Some(String::from("accepted"));
                 } else if text.starts_with("AURELAY_REJECT") {
                     println!("Connection REJECTED by {}", src.ip());
+                    push_log(&format!("Connection REJECTED by {}", src.ip()));
                     return Some(String::from("rejected"));
                 }
             }
@@ -325,6 +328,79 @@ lazy_static! {
     static ref FFMPEG_CONTROL: Arc<Mutex<Option<std::sync::mpsc::Sender<()>>>> = Arc::new(Mutex::new(None));
 }
 
+lazy_static! {
+    // Simple in-memory log buffer exposed to Kotlin for UI display.
+    static ref NATIVE_LOGS: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+}
+
+fn push_log(msg: &str) {
+    let mut logs = NATIVE_LOGS.lock().unwrap();
+    logs.push(msg.to_string());
+    if logs.len() > 500 {
+        let excess = logs.len() - 500;
+        logs.drain(0..excess);
+    }
+}
+
+/// C wrapper to get native logs (newline-separated). Caller supplies buffer.
+#[no_mangle]
+pub extern "C" fn get_native_logs_c(out_ptr: *mut c_char, out_len: usize) -> c_int {
+    if out_ptr.is_null() || out_len == 0 {
+        return -1;
+    }
+    let logs = NATIVE_LOGS.lock().unwrap();
+    let joined = logs.join("\n");
+    match CString::new(joined) {
+        Ok(cstr) => {
+            let bytes = cstr.as_bytes_with_nul();
+            unsafe {
+                let dst = std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len);
+                let copy_len = std::cmp::min(bytes.len(), out_len);
+                dst[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                if copy_len < out_len {
+                    dst[copy_len] = 0;
+                } else {
+                    dst[out_len - 1] = 0;
+                }
+            }
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// C wrapper to list CPAL input devices (newline-separated)
+#[no_mangle]
+pub extern "C" fn list_cpal_input_devices_c(out_ptr: *mut c_char, out_len: usize) -> c_int {
+    if out_ptr.is_null() || out_len == 0 { return -1; }
+    let host = cpal::default_host();
+    let mut names: Vec<String> = Vec::new();
+    if let Ok(iter) = host.input_devices() {
+        for d in iter {
+            let n = d.name().unwrap_or_else(|_| "<unknown>".to_string());
+            names.push(n);
+        }
+    }
+    let joined = names.join("\n");
+    match CString::new(joined) {
+        Ok(cstr) => {
+            let bytes = cstr.as_bytes_with_nul();
+            unsafe {
+                let dst = std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len);
+                let copy_len = std::cmp::min(bytes.len(), out_len);
+                dst[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                if copy_len < out_len {
+                    dst[copy_len] = 0;
+                } else {
+                    dst[out_len - 1] = 0;
+                }
+            }
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
 /// Start streaming by spawning `ffmpeg` to capture from PulseAudio/PipeWire and
 /// pipe raw PCM to a TCP connection to `host:port`.
 pub fn start_ffmpeg_stream(host: String, port: u16, device_name: Option<String>) {
@@ -449,6 +525,7 @@ pub fn start_stream(target_ip: String) {
     }
 
     println!("Starting stream to {}", target_ip);
+    push_log(&format!("Starting stream to {}", target_ip));
 
     let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").expect("couldn't bind to address"));
     socket.set_broadcast(true).expect("failed to enable broadcast");
@@ -464,6 +541,7 @@ pub fn start_stream(target_ip: String) {
          return;
     }
     println!("UDP socket connected to {}", target_addr);
+    push_log(&format!("UDP socket connected to {}", target_addr));
 
     let host = cpal::default_host();
     let device = match find_input_device(&host) {
@@ -473,7 +551,9 @@ pub fn start_stream(target_ip: String) {
             return;
         }
     };
-    println!("Using audio device: {}", device.name().unwrap_or("Unknown".to_string()));
+    let dev_name = device.name().unwrap_or("Unknown".to_string());
+    println!("Using audio device: {}", dev_name);
+    push_log(&format!("Using audio device: {}", dev_name));
 
     let config = match device.default_input_config() {
         Ok(c) => c,
@@ -517,6 +597,7 @@ pub fn start_stream(target_ip: String) {
             state.stream = Some(SendStream { _stream: s });
             state.is_running = true;
             println!("Stream started successfully");
+            push_log("Stream started successfully");
         }
         Err(e) => {
             eprintln!("Failed to build input stream: {}", e);
