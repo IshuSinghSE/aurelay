@@ -113,22 +113,7 @@ fun App() {
                     Spacer(modifier = Modifier.width(8.dp))
 
                     Button(onClick = {
-                        // List CPAL devices via native call
-                        thread(start = true) {
-                            try {
-                                val list = uniffi.rust_engine.listCpalInputDevices()
-                                availableDevices = list
-                                showDeviceDialog = true
-                            } catch (e: Exception) {
-                                statusMessage = "Failed to list CPAL devices: ${'$'}{e.message}"
-                            }
-                        }
-                    }, enabled = !isStreaming) {
-                        Text("List CPAL")
-                    }
-
-                    Button(onClick = {
-                        // Refresh device list using `pactl list short sources` in background
+                        // List PulseAudio/PipeWire sources (monitors)
                         thread(start = true) {
                             try {
                                 val pb = ProcessBuilder("pactl", "list", "short", "sources")
@@ -138,21 +123,48 @@ fun App() {
                                 val list = mutableListOf<String>()
                                 var line: String? = out.readLine()
                                 while (line != null) {
-                                    val parts = line.trim().split(Regex("\t+| +"))
+                                    val parts = line.trim().split(Regex("\\t+| +"))
                                     if (parts.size >= 2) {
-                                        list.add(parts[1])
+                                        val name = parts[1]
+                                        // Only show monitor sources (for system audio capture)
+                                        if (name.contains("monitor") || name.contains("loopback")) {
+                                            list.add(name)
+                                        }
                                     }
                                     line = out.readLine()
                                 }
                                 out.close()
-                                availableDevices = list
+                                availableDevices = if (list.isEmpty()) {
+                                    listOf("No monitor sources found. Use 'List CPAL' for direct device access.")
+                                } else {
+                                    list
+                                }
                                 showDeviceDialog = true
                             } catch (e: Exception) {
-                                statusMessage = "Failed to list devices: ${'$'}{e.message}"
+                                statusMessage = "Failed to list PulseAudio sources: ${e.message}"
                             }
                         }
                     }, enabled = !isStreaming) {
-                        Text("Refresh")
+                        Text("List Monitors")
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(onClick = {
+                        // List CPAL devices (pipewire, pulse, default - the useful ones)
+                        thread(start = true) {
+                            try {
+                                val list = uniffi.rust_engine.listCpalInputDevices()
+                                availableDevices = list.ifEmpty {
+                                    listOf("No CPAL devices found")
+                                }
+                                showDeviceDialog = true
+                            } catch (e: Exception) {
+                                statusMessage = "Failed to list CPAL devices: ${e.message}"
+                            }
+                        }
+                    }, enabled = !isStreaming) {
+                        Text("List CPAL")
                     }
                 }
 

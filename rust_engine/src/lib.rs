@@ -1,216 +1,253 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use lazy_static::lazy_static;
-use std::net::UdpSocket;
-use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::process::{Command, Stdio};
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+use cpal::traits::DeviceTrait;
+
+// Modular structure: Keep lib.rs as a thin FFI bridge
+mod models;
+mod audio;
+mod network;
+mod discovery;
+mod logs;
+mod ffmpeg;
+
+pub use models::*;
+pub use logs::*;
 
 uniffi::setup_scaffolding!();
 
-// Wrapper around cpal::Stream to allow sending it between threads.
-struct SendStream {
-    _stream: cpal::Stream,
-}
-unsafe impl Send for SendStream {}
-unsafe impl Sync for SendStream {}
+// Global engine state (singleton pattern)
+use once_cell::sync::Lazy;
 
-struct AudioState {
-    stream: Option<SendStream>,
-    is_running: bool,
+struct EngineState {
+    is_streaming: bool,
+    stream: Option<audio::SendStream>,
+    transport: Option<Box<dyn network::AudioTransport>>,
 }
 
-/// Discover receivers on the local network by broadcasting an
-/// `AURELAY_DISCOVER` UDP packet and collecting `AURELAY_RESPONSE` replies.
-#[uniffi::export]
-pub fn discover_receivers(timeout_secs: u64) -> Vec<String> {
-    let mut results: Vec<String> = Vec::new();
-
-    // Create socket for broadcasting and receiving
-    let socket = match UdpSocket::bind("0.0.0.0:0") {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("discover: failed to bind socket: {}", e);
-            return results;
+impl Default for EngineState {
+    fn default() -> Self {
+        Self {
+            is_streaming: false,
+            stream: None,
+            transport: None,
         }
+    }
+}
+
+static ENGINE: Lazy<Mutex<EngineState>> = Lazy::new(|| {
+    Mutex::new(EngineState::default())
+});
+
+// === Core streaming logic using modular transport system ===
+
+fn start_streaming_impl(target_ip: String, device_name: Option<String>, mode_str: Option<String>) {
+    let mut engine = ENGINE.lock().unwrap();
+    
+    if engine.is_streaming {
+        eprintln!("[engine] Already streaming");
+        return;
+    }
+    
+    // Determine transport mode
+    let mode = mode_str
+        .and_then(|s| TransportMode::from_str(&s))
+        .unwrap_or(TransportMode::TcpOnly);
+    
+    eprintln!("[engine] ========== Starting Stream ({:?}) ==========", mode);
+    push_log(&format!("[engine] Starting {:?} stream to {}", mode, target_ip));
+    
+    let target_addr = if target_ip.contains(":") {
+        target_ip.clone()
+    } else {
+        format!("{}:5000", target_ip)
     };
-
-    // Allow broadcasts
-    let _ = socket.set_broadcast(true);
-
-    // Determine local subnet broadcast (best-effort)
-    let mut targets = vec![String::from("255.255.255.255")];
-    if let Ok(tmp) = UdpSocket::bind("0.0.0.0:0") {
-        if tmp.connect("8.8.8.8:80").is_ok() {
-            if let Ok(local) = tmp.local_addr() {
-                let ip = local.ip().to_string();
-                let parts: Vec<&str> = ip.split('.').collect();
-                if parts.len() == 4 {
-                    let mut sb = parts.clone();
-                    sb[3] = "255";
-                    let subnet = format!("{}.{}.{}.255", sb[0], sb[1], sb[2]);
-                    if !targets.contains(&subnet) {
-                        targets.push(subnet);
-                    }
-                }
-            }
-        }
-    }
-
-    // Message to broadcast
-    let msg = b"AURELAY_DISCOVER";
-
-    // Send to all broadcast targets
-    for t in &targets {
-        let addr = format!("{}:5002", t);
-        let _ = socket.send_to(msg, &addr);
-    }
-
-    // Set read timeout for receive loop
-    let timeout = Duration::from_secs(timeout_secs);
-    let start = Instant::now();
-    let mut buf = [0u8; 1500];
-
-    while start.elapsed() < timeout {
-        // compute remaining time for this recv
-        let _remaining = timeout.checked_sub(start.elapsed()).unwrap_or_default();
-        let _ = socket.set_read_timeout(Some(Duration::from_millis(500)));
-
-        match socket.recv_from(&mut buf) {
-            Ok((n, src)) => {
-                if n == 0 { continue }
-                let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                if text.starts_with("AURELAY_RESPONSE") {
-                    let parts: Vec<&str> = text.split(';').collect();
-                    if parts.len() >= 3 {
-                        let port = parts[1];
-                        let name = parts[2];
-                        let entry = format!("{}:{};{}", src.ip(), port, name);
-                        if !results.contains(&entry) {
-                            push_log(&format!("Discovered: {}", entry));
-                            results.push(entry);
-                        }
-                    }
-                }
-            }
-            Err(_e) => {
-                // timeout or other; continue until overall timeout
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-        // small sleep to avoid busy loop
-        std::thread::sleep(Duration::from_millis(10));
-    }
-
-    results
-}
-
-/// Send a connection request to a receiver and wait for ACCEPT/REJECT.
-/// Returns Some("accepted") or Some("rejected") or None on timeout.
-#[uniffi::export]
-pub fn request_connect_and_wait(host: String, timeout_secs: u64, device_name: String) -> Option<String> {
-    let target = format!("{}:5002", host);
-
-    // Try to bind to the discovery port so replies land here
-    let sock = match UdpSocket::bind("0.0.0.0:5002") {
-        Ok(s) => s,
-        Err(_) => match UdpSocket::bind("0.0.0.0:0") {
-            Ok(s2) => s2,
+    
+    let (ip, port) = if let Some(colon_pos) = target_addr.find(':') {
+        let ip = target_addr[..colon_pos].to_string();
+        let port = target_addr[colon_pos + 1..].parse::<u16>().unwrap_or(5000);
+        (ip, port)
+    } else {
+        (target_addr.clone(), 5000)
+    };
+    
+    // Step 1: Establish session (may involve handshake)
+    eprintln!("[engine] Step 1: Establishing session...");
+    let session = if mode.requires_handshake() {
+        match network::handshake(ip.clone(), port, mode) {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("connect: failed to bind socket: {}", e);
-                return None;
+                eprintln!("[engine] ✗ Handshake failed: {}", e);
+                push_log(&format!("[engine] Handshake error: {}", e));
+                return;
             }
+        }
+    } else {
+        SessionState {
+            token: None,
+            target_ip: ip,
+            target_port: port,
+            mode,
         }
     };
-
-    let _ = sock.set_broadcast(true);
-
-    let msg = format!("AURELAY_CONNECT;{}", device_name);
-    if let Err(e) = sock.send_to(msg.as_bytes(), &target) {
-        eprintln!("connect: failed to send connect request: {}", e);
-        return None;
-    }
-
-    let timeout = Duration::from_secs(timeout_secs);
-    let start = Instant::now();
-    let mut buf = [0u8; 1024];
-
-    while start.elapsed() < timeout {
-        let _ = sock.set_read_timeout(Some(Duration::from_millis(500)));
-        match sock.recv_from(&mut buf) {
-            Ok((n, src)) => {
-                if n == 0 { continue }
-                let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                if text.starts_with("AURELAY_ACCEPT") {
-                    println!("Connection ACCEPTED by {}", src.ip());
-                    push_log(&format!("Connection ACCEPTED by {}", src.ip()));
-                    return Some(String::from("accepted"));
-                } else if text.starts_with("AURELAY_REJECT") {
-                    println!("Connection REJECTED by {}", src.ip());
-                    push_log(&format!("Connection REJECTED by {}", src.ip()));
-                    return Some(String::from("rejected"));
+    
+    eprintln!("[engine] ✓ Session established");
+    
+    // Step 2: Create transport based on mode
+    eprintln!("[engine] Step 2: Creating transport...");
+    let transport = match network::create_transport(&session) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[engine] ✗ Failed to create transport: {}", e);
+            push_log(&format!("[engine] Transport error: {}", e));
+            return;
+        }
+    };
+    
+    eprintln!("[engine] ✓ Transport ready");
+    
+    // Step 3: Find audio device
+    eprintln!("[engine] Step 3: Finding audio device...");
+    let device = match device_name {
+        Some(ref name) if !name.is_empty() => {
+            eprintln!("[engine] Looking for device: {}", name);
+            audio::find_device_by_name(name)
+                .or_else(|| {
+                    eprintln!("[engine] Device '{}' not found, trying default monitor", name);
+                    audio::get_default_monitor()
+                })
+        }
+        _ => {
+            eprintln!("[engine] Using default monitor");
+            audio::get_default_monitor()
+        }
+    };
+    
+    let device = match device {
+        Some(d) => d,
+        None => {
+            eprintln!("[engine] ✗ No suitable audio device found");
+            push_log("[engine] ERROR: No audio device available");
+            return;
+        }
+    };
+    
+    let dev_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+    eprintln!("[engine] ✓ Selected device: {}", dev_name);
+    push_log(&format!("[engine] Using device: {}", dev_name));
+    
+    // Step 4: Start capture with transport callback
+    eprintln!("[engine] Step 4: Starting audio capture...");
+    let transport_arc = Arc::new(Mutex::new(transport));
+    let transport_clone = transport_arc.clone();
+    
+    let capture_result = audio::start_capture(device, move |data| {
+        if let Ok(transport) = transport_clone.lock() {
+            let _ = transport.send(data);
+        }
+    });
+    
+    match capture_result {
+        Ok(stream) => {
+            eprintln!("[engine] ✓ Capture started successfully");
+            engine.stream = Some(audio::SendStream { _stream: stream });
+            
+            // Extract transport from Arc<Mutex<Box>>
+            match Arc::try_unwrap(transport_arc) {
+                Ok(mutex) => {
+                    engine.transport = Some(mutex.into_inner().unwrap());
+                }
+                Err(_) => {
+                    eprintln!("[engine] Warning: Transport has multiple references");
                 }
             }
-            Err(_) => {
-                // no packet, keep waiting
-                std::thread::sleep(Duration::from_millis(50));
-            }
+            
+            engine.is_streaming = true;
+            push_log("[engine] Stream started successfully");
+            eprintln!("[engine] ========================================");
+        }
+        Err(e) => {
+            eprintln!("[engine] ✗ Failed to start capture: {}", e);
+            push_log(&format!("[engine] Capture error: {}", e));
         }
     }
-
-    None
 }
 
-/// C-compatible wrapper to start streaming audio to target IP: uses existing `start_stream`.
+fn stop_streaming_impl() {
+    let mut engine = ENGINE.lock().unwrap();
+    
+    if engine.is_streaming {
+        push_log("[engine] Stopping stream");
+        
+        // Close transport
+        if let Some(ref transport) = engine.transport {
+            let _ = transport.close();
+        }
+        
+        engine.stream = None;
+        engine.transport = None;
+        engine.is_streaming = false;
+    }
+}
+
+// === FFI C Wrappers (thin bridge to implementation) ===
+
+/// C-compatible wrapper to start streaming audio to target IP.
+/// Uses TCP-only mode by default (compatible with current Android).
 #[no_mangle]
 pub extern "C" fn start_stream_c(host: *const c_char) -> c_int {
-    if host.is_null() {
-        return -1;
-    }
+    if host.is_null() { return -1; }
     let c = unsafe { CStr::from_ptr(host) };
-    let host_str = match c.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return -1,
-    };
-
-    // Call the Rust start_stream implementation
-    start_stream_with_device(host_str, None);
+    let host_str = match c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
+    start_streaming_impl(host_str, None, Some("tcp_only".to_string()));
     0
 }
 
-/// C-compatible wrapper to stop streaming audio: uses existing `stop_stream`.
+/// C-compatible wrapper to stop streaming audio.
 #[no_mangle]
 pub extern "C" fn stop_stream_c() -> c_int {
-    stop_stream();
+    stop_streaming_impl();
     0
 }
 
 /// C-compatible wrapper to start streaming with optional device name.
 #[no_mangle]
 pub extern "C" fn start_stream_with_device_c(host: *const c_char, device: *const c_char) -> c_int {
-    if host.is_null() {
-        return -1;
-    }
+    if host.is_null() { return -1; }
     let host_c = unsafe { CStr::from_ptr(host) };
-    let host_str = match host_c.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return -1,
-    };
+    let host_str = match host_c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
+    let device_opt = if device.is_null() { None } else { let d = unsafe { CStr::from_ptr(device) }; match d.to_str() { Ok(s) => Some(s.to_string()), Err(_) => None } };
+    start_streaming_impl(host_str, device_opt, Some("tcp_only".to_string()));
+    0
+}
 
+/// Start stream with transport mode selection.
+/// mode: "tcp_only", "tcp_udp", "tcp_udp_auth", "tls_udp_auth"
+#[no_mangle]
+pub extern "C" fn start_stream_with_mode_c(
+    host: *const c_char,
+    device: *const c_char,
+    mode: *const c_char
+) -> c_int {
+    if host.is_null() { return -1; }
+    let host_c = unsafe { CStr::from_ptr(host) };
+    let host_str = match host_c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
+    
     let device_opt = if device.is_null() {
         None
     } else {
         let d = unsafe { CStr::from_ptr(device) };
-        match d.to_str() {
-            Ok(s) => Some(s.to_string()),
-            Err(_) => None,
-        }
+        match d.to_str() { Ok(s) => Some(s.to_string()), Err(_) => None }
     };
-
-    start_stream_with_device(host_str, device_opt);
+    
+    let mode_opt = if mode.is_null() {
+        Some("tcp_only".to_string())
+    } else {
+        let m = unsafe { CStr::from_ptr(mode) };
+        match m.to_str() { Ok(s) => Some(s.to_string()), Err(_) => Some("tcp_only".to_string()) }
+    };
+    
+    start_streaming_impl(host_str, device_opt, mode_opt);
     0
 }
 
@@ -219,13 +256,9 @@ pub extern "C" fn start_stream_with_device_c(host: *const c_char, device: *const
 /// Returns 0 on success, -1 on error.
 #[no_mangle]
 pub extern "C" fn discover_receivers_c(timeout_secs: u64, out_ptr: *mut c_char, out_len: usize) -> c_int {
-    if out_ptr.is_null() || out_len == 0 {
-        return -1;
-    }
-
-    let results = discover_receivers(timeout_secs);
+    if out_ptr.is_null() || out_len == 0 { return -1; }
+    let results = discovery::discover_receivers_impl(timeout_secs);
     let out_str = results.join("\n");
-
     match CString::new(out_str) {
         Ok(cstr) => {
             let bytes = cstr.as_bytes_with_nul();
@@ -233,12 +266,7 @@ pub extern "C" fn discover_receivers_c(timeout_secs: u64, out_ptr: *mut c_char, 
                 let dst = std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len);
                 let copy_len = std::cmp::min(bytes.len(), out_len);
                 dst[..copy_len].copy_from_slice(&bytes[..copy_len]);
-                if copy_len < out_len {
-                    dst[copy_len] = 0;
-                } else {
-                    // ensure last byte is null
-                    dst[out_len - 1] = 0;
-                }
+                if copy_len < out_len { dst[copy_len] = 0; } else { dst[out_len - 1] = 0; }
             }
             0
         }
@@ -250,28 +278,13 @@ pub extern "C" fn discover_receivers_c(timeout_secs: u64, out_ptr: *mut c_char, 
 /// Writes `accepted`/`rejected`/`timeout` into `out_ptr` (null-terminated). Returns 0 on success.
 #[no_mangle]
 pub extern "C" fn request_connect_and_wait_c(host: *const c_char, timeout_secs: u64, device_name: *const c_char, out_ptr: *mut c_char, out_len: usize) -> c_int {
-    if host.is_null() || device_name.is_null() || out_ptr.is_null() || out_len == 0 {
-        return -1;
-    }
-
+    if host.is_null() || device_name.is_null() || out_ptr.is_null() || out_len == 0 { return -1; }
     let host_c = unsafe { CStr::from_ptr(host) };
     let dev_c = unsafe { CStr::from_ptr(device_name) };
-
-    let host_str = match host_c.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return -1,
-    };
-    let dev_str = match dev_c.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => return -1,
-    };
-
-    let res = request_connect_and_wait(host_str, timeout_secs, dev_str);
-    let out_text = match res {
-        Some(s) => s,
-        None => String::from("timeout"),
-    };
-
+    let host_str = match host_c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
+    let dev_str = match dev_c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
+    let res = discovery::request_connect_and_wait_impl(host_str, timeout_secs, dev_str);
+    let out_text = match res { Some(s) => s, None => String::from("timeout") };
     match CString::new(out_text) {
         Ok(cstr) => {
             let bytes = cstr.as_bytes_with_nul();
@@ -279,11 +292,7 @@ pub extern "C" fn request_connect_and_wait_c(host: *const c_char, timeout_secs: 
                 let dst = std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len);
                 let copy_len = std::cmp::min(bytes.len(), out_len);
                 dst[..copy_len].copy_from_slice(&bytes[..copy_len]);
-                if copy_len < out_len {
-                    dst[copy_len] = 0;
-                } else {
-                    dst[out_len - 1] = 0;
-                }
+                if copy_len < out_len { dst[copy_len] = 0; } else { dst[out_len - 1] = 0; }
             }
             0
         }
@@ -291,96 +300,34 @@ pub extern "C" fn request_connect_and_wait_c(host: *const c_char, timeout_secs: 
     }
 }
 
-/// C-compatible wrapper to start ffmpeg-based stream: `start_ffmpeg_stream_c(host, port, device)`
+/// C-compatible wrapper to start ffmpeg-based stream: delegates to ffmpeg module.
 #[no_mangle]
 pub extern "C" fn start_ffmpeg_stream_c(host: *const c_char, port: c_int, device: *const c_char) -> c_int {
     if host.is_null() { return -1; }
     let host_c = unsafe { CStr::from_ptr(host) };
     let host_str = match host_c.to_str() { Ok(s) => s.to_string(), Err(_) => return -1 };
-
     let port_u = if port <= 0 { 5000u16 } else { port as u16 };
-
-    let device_opt = if device.is_null() {
-        None
-    } else {
-        let d = unsafe { CStr::from_ptr(device) };
-        match d.to_str() { Ok(s) => Some(s.to_string()), Err(_) => None }
-    };
-
-    start_ffmpeg_stream(host_str, port_u, device_opt);
+    let device_opt = if device.is_null() { None } else { let d = unsafe { CStr::from_ptr(device) }; match d.to_str() { Ok(s) => Some(s.to_string()), Err(_) => None } };
+    ffmpeg::start_ffmpeg_stream(host_str, port_u, device_opt);
     0
 }
 
 #[no_mangle]
-pub extern "C" fn stop_ffmpeg_stream_c() -> c_int {
-    stop_ffmpeg_stream();
-    0
-}
-lazy_static! {
-    static ref AUDIO_STATE: Arc<Mutex<AudioState>> = Arc::new(Mutex::new(AudioState {
-        stream: None,
-        is_running: false,
-    }));
-}
-
-lazy_static! {
-    // Control channel sender stored here; sending a message requests the ffmpeg thread to stop.
-    static ref FFMPEG_CONTROL: Arc<Mutex<Option<std::sync::mpsc::Sender<()>>>> = Arc::new(Mutex::new(None));
-}
-
-lazy_static! {
-    // Simple in-memory log buffer exposed to Kotlin for UI display.
-    static ref NATIVE_LOGS: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-}
-
-fn push_log(msg: &str) {
-    let mut logs = NATIVE_LOGS.lock().unwrap();
-    logs.push(msg.to_string());
-    if logs.len() > 500 {
-        let excess = logs.len() - 500;
-        logs.drain(0..excess);
-    }
-}
-
-/// C wrapper to get native logs (newline-separated). Caller supplies buffer.
-#[no_mangle]
-pub extern "C" fn get_native_logs_c(out_ptr: *mut c_char, out_len: usize) -> c_int {
-    if out_ptr.is_null() || out_len == 0 {
-        return -1;
-    }
-    let logs = NATIVE_LOGS.lock().unwrap();
-    let joined = logs.join("\n");
-    match CString::new(joined) {
-        Ok(cstr) => {
-            let bytes = cstr.as_bytes_with_nul();
-            unsafe {
-                let dst = std::slice::from_raw_parts_mut(out_ptr as *mut u8, out_len);
-                let copy_len = std::cmp::min(bytes.len(), out_len);
-                dst[..copy_len].copy_from_slice(&bytes[..copy_len]);
-                if copy_len < out_len {
-                    dst[copy_len] = 0;
-                } else {
-                    dst[out_len - 1] = 0;
-                }
-            }
-            0
-        }
-        Err(_) => -1,
-    }
-}
+pub extern "C" fn stop_ffmpeg_stream_c() -> c_int { ffmpeg::stop_ffmpeg_stream(); 0 }
 
 /// C wrapper to list CPAL input devices (newline-separated)
+/// Now includes [Monitor] prefix for monitor devices.
 #[no_mangle]
 pub extern "C" fn list_cpal_input_devices_c(out_ptr: *mut c_char, out_len: usize) -> c_int {
     if out_ptr.is_null() || out_len == 0 { return -1; }
-    let host = cpal::default_host();
-    let mut names: Vec<String> = Vec::new();
-    if let Ok(iter) = host.input_devices() {
-        for d in iter {
-            let n = d.name().unwrap_or_else(|_| "<unknown>".to_string());
-            names.push(n);
+    let devices = audio::list_all_devices();
+    let names: Vec<String> = devices.iter().map(|d| {
+        if d.is_monitor {
+            format!("[Monitor] {}", d.name)
+        } else {
+            d.name.clone()
         }
-    }
+    }).collect();
     let joined = names.join("\n");
     match CString::new(joined) {
         Ok(cstr) => {
@@ -401,367 +348,3 @@ pub extern "C" fn list_cpal_input_devices_c(out_ptr: *mut c_char, out_len: usize
     }
 }
 
-/// Start streaming by spawning `ffmpeg` to capture from PulseAudio/PipeWire and
-/// pipe raw PCM to a TCP connection to `host:port`.
-pub fn start_ffmpeg_stream(host: String, port: u16, device_name: Option<String>) {
-    // If a process is already running, ignore
-    {
-        let guard = FFMPEG_CONTROL.lock().unwrap();
-        if guard.is_some() {
-            eprintln!("ffmpeg stream already running");
-            return;
-        }
-    }
-
-    // Build ffmpeg command
-    let device = device_name.unwrap_or_else(|| String::from("default"));
-    let args = vec![
-        "-f".to_string(),
-        "pulse".to_string(),
-        "-i".to_string(),
-        device.clone(),
-        "-f".to_string(),
-        "s16le".to_string(),
-        "-acodec".to_string(),
-        "pcm_s16le".to_string(),
-        "-ar".to_string(),
-        "44100".to_string(),
-        "-ac".to_string(),
-        "2".to_string(),
-        "-".to_string(),
-    ];
-
-    let mut cmd = Command::new("ffmpeg");
-    for a in &args { cmd.arg(a); }
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    match cmd.spawn() {
-        Ok(mut child) => {
-            // create control channel to signal stop
-            let (tx, rx) = std::sync::mpsc::channel::<()>();
-
-            // store sender so stop function can request shutdown
-            {
-                let mut guard = FFMPEG_CONTROL.lock().unwrap();
-                *guard = Some(tx.clone());
-            }
-
-            std::thread::spawn(move || {
-                // Connect TCP
-                let addr = format!("{}:{}", host, port);
-                match TcpStream::connect(&addr) {
-                    Ok(mut stream) => {
-                        if let Some(mut out) = child.stdout.take() {
-                            let mut buf = [0u8; 8192];
-                            loop {
-                                // check for stop signal
-                                if rx.try_recv().is_ok() {
-                                    let _ = child.kill();
-                                    break;
-                                }
-
-                                match out.read(&mut buf) {
-                                    Ok(0) => break,
-                                    Ok(n) => {
-                                        if let Err(e) = stream.write_all(&buf[..n]) {
-                                            eprintln!("stream write error: {}", e);
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("ffmpeg read error: {}", e);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to connect to {}: {}", addr, e);
-                    }
-                }
-
-                // drain stderr to logs
-                if let Some(mut err) = child.stderr.take() {
-                    let mut buf = [0u8; 1024];
-                    while let Ok(n) = err.read(&mut buf) {
-                        if n == 0 { break; }
-                        let s = String::from_utf8_lossy(&buf[..n]);
-                        eprintln!("ffmpeg: {}", s.trim_end());
-                    }
-                }
-
-                // wait for child to exit
-                let _ = child.wait();
-
-                // clear global control sender
-                let mut guard = FFMPEG_CONTROL.lock().unwrap();
-                *guard = None;
-                println!("ffmpeg stream ended");
-            });
-        }
-        Err(e) => {
-            eprintln!("Failed to spawn ffmpeg: {}", e);
-        }
-    }
-}
-
-/// Stop any running ffmpeg-based stream.
-pub fn stop_ffmpeg_stream() {
-    let mut guard = FFMPEG_CONTROL.lock().unwrap();
-    if let Some(tx) = guard.take() {
-        // signal the thread to stop; the thread will kill the child
-        let _ = tx.send(());
-        println!("Requested ffmpeg stop");
-    }
-}
-
-#[uniffi::export]
-pub fn start_stream(target_ip: String) {
-    let mut state = AUDIO_STATE.lock().unwrap();
-    if state.is_running {
-        println!("Stream already running");
-        return;
-    }
-
-    println!("Starting stream to {}", target_ip);
-    push_log(&format!("Starting stream to {}", target_ip));
-
-    let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").expect("couldn't bind to address"));
-    socket.set_broadcast(true).expect("failed to enable broadcast");
-
-    let target_addr = if target_ip.contains(":") {
-        target_ip
-    } else {
-        format!("{}:5000", target_ip)
-    };
-
-    if let Err(e) = socket.connect(&target_addr) {
-         eprintln!("Failed to connect UDP socket: {}", e);
-         return;
-    }
-    println!("UDP socket connected to {}", target_addr);
-    push_log(&format!("UDP socket connected to {}", target_addr));
-
-    let host = cpal::default_host();
-    let device = match find_input_device(&host) {
-        Some(d) => d,
-        None => {
-            eprintln!("No suitable audio input device found!");
-            return;
-        }
-    };
-    let dev_name = device.name().unwrap_or("Unknown".to_string());
-    println!("Using audio device: {}", dev_name);
-    push_log(&format!("Using audio device: {}", dev_name));
-
-    let config = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to get default input config: {}", e);
-            return;
-        }
-    };
-
-    let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
-    };
-
-    let socket_clone = socket.clone();
-
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[i16], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::U16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[u16], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        _ => return,
-    };
-
-    match stream {
-        Ok(s) => {
-            s.play().unwrap();
-            state.stream = Some(SendStream { _stream: s });
-            state.is_running = true;
-            println!("Stream started successfully");
-            push_log("Stream started successfully");
-        }
-        Err(e) => {
-            eprintln!("Failed to build input stream: {}", e);
-        }
-    }
-}
-
-/// Start streaming to target IP using an explicit device name if provided.
-pub fn start_stream_with_device(target_ip: String, device_name: Option<String>) {
-    let mut state = AUDIO_STATE.lock().unwrap();
-    if state.is_running {
-        println!("Stream already running");
-        return;
-    }
-
-    println!("Starting stream to {} (device={:?})", target_ip, device_name);
-
-    let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").expect("couldn't bind to address"));
-    socket.set_broadcast(true).expect("failed to enable broadcast");
-
-    let target_addr = if target_ip.contains(":") {
-        target_ip
-    } else {
-        format!("{}:5000", target_ip)
-    };
-
-    if let Err(e) = socket.connect(&target_addr) {
-         eprintln!("Failed to connect UDP socket: {}", e);
-         return;
-    }
-    println!("UDP socket connected to {}", target_addr);
-
-    let host = cpal::default_host();
-    let device = match device_name {
-        Some(name) if !name.is_empty() => find_input_device_by_name(&host, &name).or_else(|| find_input_device(&host)),
-        _ => find_input_device(&host),
-    };
-    let device = match device {
-        Some(d) => d,
-        None => {
-            eprintln!("No suitable audio input device found!");
-            return;
-        }
-    };
-    println!("Using audio device: {}", device.name().unwrap_or("Unknown".to_string()));
-
-    let config = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to get default input config: {}", e);
-            return;
-        }
-    };
-
-    let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
-    };
-
-    let socket_clone = socket.clone();
-
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[i16], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::U16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[u16], _: &_| write_audio_data(data, &socket_clone),
-            err_fn,
-            None,
-        ),
-        _ => return,
-    };
-
-    match stream {
-        Ok(s) => {
-            s.play().unwrap();
-            state.stream = Some(SendStream { _stream: s });
-            state.is_running = true;
-            println!("Stream started successfully");
-        }
-        Err(e) => {
-            eprintln!("Failed to build input stream: {}", e);
-        }
-    }
-}
-
-fn find_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
-    let devices_iter = host.input_devices().ok()?;
-    let devices: Vec<cpal::Device> = devices_iter.collect();
-    let needle = name.to_lowercase();
-
-    // First try exact substring match
-    for device in &devices {
-        let n = device.name().unwrap_or_default().to_lowercase();
-        if !needle.is_empty() && n.contains(&needle) {
-            return Some(device.clone());
-        }
-    }
-
-    // Try tokenized matching: split provided name into tokens and match any
-    let tokens: Vec<String> = name
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|s| s.len() > 2)
-        .map(|s| s.to_lowercase())
-        .collect();
-
-    if !tokens.is_empty() {
-        for device in &devices {
-            let n = device.name().unwrap_or_default().to_lowercase();
-            for t in &tokens {
-                if n.contains(t) {
-                    return Some(device.clone());
-                }
-            }
-        }
-    }
-
-    None
-}
-
-#[uniffi::export]
-pub fn stop_stream() {
-    let mut state = AUDIO_STATE.lock().unwrap();
-    if state.is_running {
-        println!("Stopping stream");
-        state.stream = None;
-        state.is_running = false;
-    }
-}
-
-fn find_input_device(host: &cpal::Host) -> Option<cpal::Device> {
-    let devices = host.input_devices().ok()?;
-    for device in devices {
-        let name = device.name().unwrap_or_default().to_lowercase();
-        if name.contains("monitor") || name.contains("analog stereo") {
-             return Some(device);
-        }
-    }
-    host.default_input_device()
-}
-
-fn write_audio_data<T>(input: &[T], socket: &UdpSocket)
-where
-    T: cpal::Sample,
-{
-    let size = std::mem::size_of::<T>();
-    let byte_len = input.len() * size;
-    let bytes = unsafe {
-        std::slice::from_raw_parts(input.as_ptr() as *const u8, byte_len)
-    };
-
-    const CHUNK_SIZE: usize = 1400;
-    for chunk in bytes.chunks(CHUNK_SIZE) {
-        if let Err(_e) = socket.send(chunk) {
-            // Ignore errors
-        }
-    }
-}

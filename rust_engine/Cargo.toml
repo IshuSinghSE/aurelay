@@ -10,6 +10,7 @@ name = "rust_engine"
 [dependencies]
 cpal = "0.15"
 lazy_static = "1.4"
+once_cell = "1.19"
 uniffi = { version = "0.28", features = ["cli"] }
 
 [build-dependencies]
