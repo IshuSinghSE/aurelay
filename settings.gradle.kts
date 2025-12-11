@@ -22,6 +22,7 @@ dependencyResolutionManagement {
 rootProject.name = "Aurelay"
 include(":app")
 include(":desktopApp")
+include(":shared")
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
 }

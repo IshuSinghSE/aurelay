@@ -5,13 +5,12 @@ plugins {
 }
 
 kotlin {
-    jvm {
-        withJava()
-    }
+    jvm()
 
     sourceSets {
         val jvmMain by getting {
             dependencies {
+                implementation(project(":shared"))
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
                 implementation("net.java.dev.jna:jna:5.13.0")
@@ -62,14 +61,14 @@ tasks.register<Exec>("cargoBuild") {
             val generateCmd = listOf("uniffi-bindgen", "generate", "--library", source.absolutePath, "--language", "kotlin", "--out-dir", kotlinOutDir.absolutePath)
 
             try {
-                val result = exec {
-                    workingDir = rustDir
-                    isIgnoreExitValue = true
-                    commandLine(generateCmd)
-                }
+                val processBuilder = ProcessBuilder(generateCmd)
+                    .directory(rustDir)
+                    .redirectErrorStream(true)
+                val process = processBuilder.start()
+                val exitCode = process.waitFor()
 
-                if (result.exitValue != 0) {
-                    logger.warn("Couldn't run 'uniffi-bindgen' to generate Kotlin bindings (exit=${result.exitValue}).")
+                if (exitCode != 0) {
+                    logger.warn("Couldn't run 'uniffi-bindgen' to generate Kotlin bindings (exit=$exitCode).")
                     logger.warn("Install the CLI with `cargo install uniffi-bindgen` and ensure it's on your PATH, or generate bindings manually.")
                     logger.warn("Continuing build with fallback Kotlin stubs (if present).")
                 }
@@ -86,10 +85,9 @@ tasks.register<Exec>("cargoBuild") {
     }
 }
 
-tasks.named("processResources") {
-    dependsOn("cargoBuild")
-}
-
-tasks.named("compileKotlinJvm") {
-    dependsOn("cargoBuild")
+// Make cargo build run before Kotlin compilation
+afterEvaluate {
+    tasks.named("compileKotlinJvm").configure {
+        dependsOn("cargoBuild")
+    }
 }

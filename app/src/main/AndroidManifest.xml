@@ -25,7 +25,7 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="@string/admob_app_id" />
         <activity
-            android:name=".MainActivity"
+            android:name=".MainActivityShared"
             android:exported="true">
             <!-- The theme can be set on the application level, no need to repeat it here unless it's different -->
             <intent-filter>

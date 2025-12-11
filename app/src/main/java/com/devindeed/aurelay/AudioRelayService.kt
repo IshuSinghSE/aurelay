@@ -101,7 +101,7 @@ class AudioRelayService : Service() {
                                 val senderName = parts.getOrNull(1) ?: "Android Device"
                                 // Store the sender name for notification updates
                                 lastClientName = senderName
-                                val bcast = Intent(MainActivity.ACTION_CONNECTION_REQUEST)
+                                val bcast = Intent(MainActivityShared.ACTION_CONNECTION_REQUEST)
                                 bcast.setPackage(packageName)
                                 bcast.putExtra("client_ip", packet.address.hostAddress ?: "")
                                 bcast.putExtra("client_name", senderName)
@@ -190,7 +190,7 @@ class AudioRelayService : Service() {
 
     private fun buildNotification(): Notification {
         // Create intent to open the app
-        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+        val openAppIntent = Intent(this, MainActivityShared::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val openAppPendingIntent = PendingIntent.getActivity(

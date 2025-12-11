@@ -1,0 +1,326 @@
+package com.devindeed.aurelay.desktop
+
+import androidx.compose.runtime.remember
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.application
+import com.aurelay.App
+import com.aurelay.engine.DesktopAudioEngine
+import java.io.File
+
+/**
+ * Desktop Main using the shared KMP module.
+ * 
+ * This is the new streamlined main function that uses:
+ * - shared App() composable for UI
+ * - DesktopAudioEngine for business logic (Rust/CPAL)
+ */
+fun main() = application {
+    // Load the Rust native library
+    loadNativeLibrary()
+    
+    Window(
+        onCloseRequest = ::exitApplication,
+        title = "Aurelay Sender - Desktop"
+    ) {
+        val audioEngine = remember { DesktopAudioEngine() }
+        
+        // Use the shared App from the KMP module
+        App(audioEngine = audioEngine)
+    }
+}
+
+/**
+ * Load the Rust native library (librust_engine.so / rust_engine.dll).
+ * Looks in resources first, then falls back to system library path.
+ */
+private fun loadNativeLibrary() {
+    try {
+        val osName = System.getProperty("os.name").lowercase()
+        val libName = if (osName.contains("win")) "rust_engine.dll" else "librust_engine.so"
+        
+        // Try to load from resources (bundled with app)
+        val resourceStream = object {}.javaClass.getResourceAsStream("/$libName")
+        if (resourceStream != null) {
+            val tempLib = File.createTempFile("rust_engine", if (osName.contains("win")) ".dll" else ".so")
+            tempLib.deleteOnExit()
+            
+            resourceStream.use { input ->
+                tempLib.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            
+            System.setProperty("uniffi.component.rust_engine.libraryOverride", tempLib.absolutePath)
+            println("[Main] Loaded native library from resources: ${tempLib.absolutePath}")
+        } else {
+            // Library will be loaded from system path by JNA
+            println("[Main] Native library not found in resources, will try system path")
+        }
+    } catch (e: Exception) {
+        System.err.println("[Main] Warning: Could not load native library: ${e.message}")
+        System.err.println("[Main] Make sure to build the Rust library first: ./gradlew :desktopApp:cargoBuild")
+    }
+}
+
+// Keep the old implementation for reference (can be removed later)
+@Deprecated("Use shared App() from KMP module instead")
+private fun oldMain() {
+    // Old implementation moved to Main_old.kt for reference
+}
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Button(onClick = {
+                        // List CPAL devices (pipewire, pulse, default - the useful ones)
+                        thread(start = true) {
+                            try {
+                                val list = uniffi.rust_engine.listCpalInputDevices()
+                                availableDevices = list.ifEmpty {
+                                    listOf("No CPAL devices found")
+                                }
+                                showDeviceDialog = true
+                            } catch (e: Exception) {
+                                statusMessage = "Failed to list CPAL devices: ${e.message}"
+                            }
+                        }
+                    }, enabled = !isStreaming) {
+                        Text("List CPAL")
+                    }
+                }
+
+                // Device selection dialog
+                if (showDeviceDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDeviceDialog = false },
+                        title = { Text("Available Audio Sources") },
+                        text = {
+                            Column {
+                                if (availableDevices.isEmpty()) {
+                                    Text("No devices found. Make sure PulseAudio/PipeWire is running.")
+                                } else {
+                                    availableDevices.forEach { dev ->
+                                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(text = dev, modifier = Modifier.weight(1f))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Button(onClick = {
+                                                deviceName = dev
+                                                showDeviceDialog = false
+                                            }) {
+                                                Text("Select")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showDeviceDialog = false }) {
+                                Text("Close")
+                            }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = {
+                            if (!discovering) {
+                                discovering = true
+                                statusMessage = "Discovering receivers..."
+                                thread(start = true) {
+                                    try {
+                                        val list = discoverReceivers(3)
+                                        discoveredDevices = list
+                                        showDiscoveryDialog = true
+                                        statusMessage = "Found ${'$'}{list.size} device(s)"
+                                    } catch (e: Exception) {
+                                        statusMessage = "Discovery failed: ${'$'}{e.message}"
+                                    } finally {
+                                        discovering = false
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isStreaming && !discovering,
+                        modifier = Modifier.height(44.dp).width(140.dp)
+                    ) {
+                        Text(if (discovering) "Discovering..." else "Discover")
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Button(
+                        onClick = {
+                            if (isStreaming) {
+                                try {
+                                    if (backend == "FFmpeg") {
+                                        stopFFmpegStream()
+                                    } else {
+                                        stopStream()
+                                        isStreaming = false
+                                        statusMessage = "Stopped"
+                                    }
+                                } catch (e: Exception) {
+                                    statusMessage = "Error stopping: ${'$'}{e.message}"
+                                }
+                            } else {
+                                if (targetIp.isBlank()) {
+                                    statusMessage = "Please enter a valid IP"
+                                } else {
+                                    try {
+                                        val parts = targetIp.split(":")
+                                        val host = parts.getOrNull(0) ?: ""
+                                        val port = parts.getOrNull(1) ?: "5000"
+                                        if (backend == "FFmpeg") {
+                                            startFFmpegStream(host, port, if (deviceName.isBlank()) null else deviceName)
+                                            isStreaming = true
+                                            statusMessage = "FFmpeg streaming to $host:$port..."
+                                        } else {
+                                            startStream(targetIp, deviceName)
+                                            isStreaming = true
+                                            statusMessage = "Streaming to ${'$'}targetIp..."
+                                        }
+                                    } catch (e: Exception) {
+                                        statusMessage = "Error starting: ${'$'}{e.message}"
+                                        e.printStackTrace()
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.height(56.dp).width(200.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isStreaming) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(if (isStreaming) "STOP" else "START")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Discovery results dialog
+                if (showDiscoveryDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDiscoveryDialog = false },
+                        title = { Text("Discovered Receivers") },
+                        text = {
+                            Column {
+                                if (discoveredDevices.isEmpty()) {
+                                    Text("No devices found.")
+                                } else {
+                                    discoveredDevices.forEach { entry ->
+                                        // entry format: ip:port;name
+                                        val parts = entry.split(";")
+                                        val host = parts.getOrNull(0)?.split(":")?.getOrNull(0) ?: ""
+                                        val port = parts.getOrNull(0)?.split(":")?.getOrNull(1) ?: "5000"
+                                        val name = parts.getOrNull(1) ?: "Unknown"
+                                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(text = name, style = MaterialTheme.typography.bodyLarge)
+                                                Text(text = "$host:$port", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Button(onClick = {
+                                                // When selected, fill targetIp and attempt handshake
+                                                targetIp = "$host:$port"
+                                                showDiscoveryDialog = false
+                                                statusMessage = "Requesting connection to $host..."
+                                                thread(start = true) {
+                                                    try {
+                                                        val deviceName = java.net.InetAddress.getLocalHost().hostName ?: System.getProperty("user.name")
+                                                        val res = requestConnectAndWait(host, 10, deviceName)
+                                                        when (res.lowercase()) {
+                                                            "accepted" -> statusMessage = "Connection accepted by $name"
+                                                            "rejected" -> statusMessage = "Connection rejected by $name"
+                                                            else -> statusMessage = "Connection timed out"
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        statusMessage = "Handshake failed: ${'$'}{e.message}"
+                                                    }
+                                                }
+                                            }) {
+                                                Text("Select")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showDiscoveryDialog = false }) {
+                                Text("Close")
+                            }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Status: ${'$'}statusMessage",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (isStreaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = {
+                        // Refresh native logs
+                        thread(start = true) {
+                            try {
+                                nativeLogs = uniffi.rust_engine.getNativeLogs()
+                                showNativeLog = true
+                            } catch (e: Exception) {
+                                statusMessage = "Failed to fetch native logs: ${'$'}{e.message}"
+                            }
+                        }
+                    }) {
+                        Text("Show Logs")
+                    }
+                }
+
+                if (showNativeLog) {
+                    AlertDialog(onDismissRequest = { showNativeLog = false }, title = { Text("Native Logs") }, text = {
+                        Column(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                            Text(nativeLogs)
+                        }
+                    }, confirmButton = { TextButton(onClick = { showNativeLog = false }) { Text("Close") } })
+                }
+            }
+        }
+    }
+}
+
+fun main() {
+    // Initialize native library
+    try {
+        val osName = System.getProperty("os.name").lowercase()
+        val libName = if (osName.contains("win")) "rust_engine.dll" else "librust_engine.so"
+
+        val inputStream = object {}.javaClass.getResourceAsStream("/$libName")
+        if (inputStream != null) {
+            val tempFile = File.createTempFile("rust_engine", if (osName.contains("win")) ".dll" else ".so")
+            tempFile.deleteOnExit()
+            tempFile.outputStream().use { output ->
+                inputStream.copyTo(output)
+            }
+            // Set the system property for UniFFI to find the library
+            // UniFFI generated code uses: System.getProperty("uniffi.component.$componentName.libraryOverride")
+            System.setProperty("uniffi.component.rust_engine.libraryOverride", tempFile.absolutePath)
+        } else {
+            System.err.println("Could not find library $libName in resources. Assuming it's in java.library.path")
+        }
+    } catch (e: Exception) {
+        System.err.println("Error loading native library: ${e.message}")
+        e.printStackTrace()
+    }
+
+    application {
+        Window(onCloseRequest = ::exitApplication, title = "Aurelay Sender") {
+            App()
+        }
+    }
+}
