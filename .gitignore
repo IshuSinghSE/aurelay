@@ -77,3 +77,9 @@ coverage/fastlane/google-play-key.json
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output
+
+# Rust
+rust_engine/target/
+desktopApp/src/jvmMain/resources/librust_engine.so
+desktopApp/src/jvmMain/resources/rust_engine.dll
+desktopApp/src/jvmMain/kotlin/com/devindeed/aurelay/desktop/uniffi/
