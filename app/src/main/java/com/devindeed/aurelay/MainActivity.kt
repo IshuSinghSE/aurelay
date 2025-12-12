@@ -145,22 +145,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Make status bar and navigation bar transparent
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        @Suppress("DEPRECATION")
-        try {
-            window.statusBarColor = android.graphics.Color.TRANSPARENT
-        } catch (_: Throwable) {}
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            @Suppress("DEPRECATION")
-            try {
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            } catch (_: Throwable) {}
-        }
-        
         // Ensure the notification channel exists
         createNotificationChannel()
         
@@ -219,30 +203,28 @@ class MainActivity : ComponentActivity() {
             
             MaterialTheme(colorScheme = colorScheme) {
                 // Sync system bars to match the app's Material color scheme and theme
-                val sysColor = MaterialTheme.colorScheme.surface.toArgb()
                 SideEffect {
                     try {
-                        @Suppress("DEPRECATION")
-                        try { window.statusBarColor = sysColor } catch (_: Throwable) {}
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            @Suppress("DEPRECATION")
-                            try { window.navigationBarColor = sysColor } catch (_: Throwable) {}
-                        }
                         val controller = WindowInsetsControllerCompat(window, window.decorView)
                         // When in light theme we want dark icons; in dark theme we want light icons
                         controller.isAppearanceLightStatusBars = !isDarkTheme
                         controller.isAppearanceLightNavigationBars = !isDarkTheme
                     } catch (e: Exception) {
-                        Log.w("MainActivity", "Failed to set system bar colors: ${e.message}")
+                        Log.w("MainActivity", "Failed to set system bar appearance: ${e.message}")
                     }
                 }
-                Surface(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.systemBars),
-                    color = MaterialTheme.colorScheme.background
+                        .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.systemBars),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        Column(modifier = Modifier.fillMaxSize()) {
                         // Main app content takes all available space so the banner can sit below it
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             AurelayApp(
@@ -287,6 +269,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
                 }
             }
         }
