@@ -3,256 +3,222 @@ package com.aurelay.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurelay.engine.AudioEngine
-import com.aurelay.engine.Receiver
 import com.aurelay.engine.StreamState
-import com.aurelay.ui.components.*
+import com.aurelay.ui.components.DeviceListItem
+import com.aurelay.ui.components.HeroControl
+import com.aurelay.ui.components.StatsCard
+import com.aurelay.ui.components.Visualizer
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import com.aurelay.engine.Receiver
 
 /**
- * Dashboard screen - the main screen showing the power button and receiver list.
- * Matches the design mockup with the large circular power button centered.
+ * The Dashboard Screen (Main).
+ *
+ * Layout:
+ * - Desktop: Two-Pane Split.
+ *   - Left (35%): Hero + My IP.
+ *   - Right (65%): Device List + Stats.
+ * - Mobile: Vertical Scroll.
  */
 @Composable
 fun DashboardScreen(
     audioEngine: AudioEngine,
-    modifier: Modifier = Modifier
+    isDesktop: Boolean
 ) {
-    val scope = rememberCoroutineScope()
     val streamState by audioEngine.streamState.collectAsState()
-    val discoveredReceivers by audioEngine.discoveredReceivers.collectAsState()
-    val selectedDevice by audioEngine.selectedDevice.collectAsState()
+    val devices by audioEngine.discoveredReceivers.collectAsState()
+    val visuals by audioEngine.visuals.collectAsState()
+    val scope = rememberCoroutineScope()
     
-    var selectedReceiver by remember { mutableStateOf<Receiver?>(null) }
-    val isStreaming = streamState == StreamState.Streaming
-    val isScanning = streamState == StreamState.Idle
-    
-    // Update selected receiver when list changes
-    LaunchedEffect(discoveredReceivers) {
-        if (selectedReceiver == null && discoveredReceivers.isNotEmpty()) {
-            selectedReceiver = discoveredReceivers.first()
-        }
-    }
-    
-    // Start discovery on launch
-    LaunchedEffect(Unit) {
+    androidx.compose.runtime.LaunchedEffect(Unit) {
         audioEngine.startDiscovery()
-        audioEngine.refreshDevices()
     }
-    
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val isWideScreen = maxWidth > 600.dp
-        
-        if (isWideScreen) {
-            // Desktop/Tablet layout: Two columns
-            Row(modifier = Modifier.fillMaxSize()) {
-                // Left: Power button and status
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    PowerSection(
-                        isStreaming = isStreaming,
-                        streamState = streamState,
-                        selectedReceiver = selectedReceiver,
-                        onPowerClick = {
-                            scope.launch {
-                                if (isStreaming) {
-                                    audioEngine.stopStreaming()
-                                } else {
-                                    selectedReceiver?.let { receiver ->
-                                        audioEngine.startStreaming(
-                                            receiver = receiver,
-                                            device = selectedDevice
-                                        )
-                                    }
-                                }
-                            }
+
+    if (isDesktop) {
+        DesktopDashboard(
+            streamState = streamState,
+            devices = devices,
+            visuals = visuals,
+            onToggleStream = {
+                scope.launch {
+                    if (streamState == StreamState.Streaming) {
+                        audioEngine.stopStreaming()
+                    } else {
+                        // Select a receiver to stream to properly
+                        // For now, if there is a device, connect to the first one or just trigger UI state
+                        if (devices.isNotEmpty()) {
+                             audioEngine.startStreaming(devices.first())
                         }
-                    )
+                    }
                 }
-                
-                VerticalDivider()
-                
-                // Right: Device list and visualizer
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(24.dp)
-                ) {
-                    ReceiverListSection(
-                        receivers = discoveredReceivers,
-                        selectedReceiver = selectedReceiver,
-                        onReceiverSelected = { selectedReceiver = it },
-                        isStreaming = isStreaming
-                    )
-                }
+            },
+            onConnect = { receiver ->
+                scope.launch { audioEngine.startStreaming(receiver) }
             }
-        } else {
-            // Mobile layout: Single column
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Power button at top (when not streaming)
-                if (!isStreaming) {
-                    PowerSection(
-                        isStreaming = isStreaming,
-                        streamState = streamState,
-                        selectedReceiver = selectedReceiver,
-                        onPowerClick = {
-                            scope.launch {
-                                selectedReceiver?.let { receiver ->
-                                    audioEngine.startStreaming(
-                                        receiver = receiver,
-                                        device = selectedDevice
-                                    )
-                                }
-                            }
+        )
+    } else {
+        MobileDashboard(
+            streamState = streamState,
+            devices = devices,
+            visuals = visuals,
+            onToggleStream = {
+                scope.launch {
+                    if (streamState == StreamState.Streaming) {
+                        audioEngine.stopStreaming()
+                    } else {
+                        if (devices.isNotEmpty()) {
+                            audioEngine.startStreaming(devices.first())
                         }
-                    )
-                    
-                    Spacer(Modifier.height(24.dp))
+                    }
                 }
-                
-                // Receivers list
-                ReceiverListSection(
-                    receivers = discoveredReceivers,
-                    selectedReceiver = selectedReceiver,
-                    onReceiverSelected = { selectedReceiver = it },
-                    isStreaming = isStreaming,
-                    modifier = Modifier.weight(1f)
-                )
-                
-                // Show stop button when streaming (mobile)
-                if (isStreaming) {
-                    Spacer(Modifier.height(16.dp))
-                    PowerButton(
-                        isStreaming = true,
-                        onClick = {
-                            scope.launch {
-                                audioEngine.stopStreaming()
-                            }
-                        },
-                        modifier = Modifier.size(160.dp)
-                    )
-                }
+            },
+            onConnect = { receiver ->
+                scope.launch { audioEngine.startStreaming(receiver) }
             }
-        }
+        )
     }
 }
 
 @Composable
-private fun PowerSection(
-    isStreaming: Boolean,
+fun DesktopDashboard(
     streamState: StreamState,
-    selectedReceiver: Receiver?,
-    onPowerClick: () -> Unit,
-    modifier: Modifier = Modifier
+    devices: List<Receiver>,
+    visuals: List<Float>,
+    onToggleStream: () -> Unit,
+    onConnect: (Receiver) -> Unit
 ) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        // Status text
-        Text(
-            text = if (isStreaming) "Broadcasting Audio" else "Ready to Stream",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        
-        // Large power button
-        PowerButton(
-            isStreaming = isStreaming,
-            enabled = selectedReceiver != null || isStreaming,
-            onClick = onPowerClick,
-            modifier = Modifier.size(200.dp)
-        )
-        
-        // Connection info
-        if (selectedReceiver != null) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+    Row(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        // Left Pane (35%)
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(0.35f)
+                .padding(end = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            HeroControl(
+                streamState = streamState,
+                onClick = onToggleStream,
+                size = 200.dp
+            )
+
+            Spacer(modifier = Modifier.height(40.dp))
+
+            Visualizer(
+                audioData = visuals,
+                isStreaming = streamState == StreamState.Streaming,
+                barCount = 30
+            )
+        }
+
+        // Right Pane (65%)
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(0.65f)
+        ) {
+            Text(
+                text = "Nearby Devices",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        if (isStreaming) "Streaming To" else "Selected Receiver",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        selectedReceiver.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        selectedReceiver.address,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary
+                items(devices) { device ->
+                    DeviceListItem(
+                        device = device,
+                        onClick = { onConnect(device) }
                     )
                 }
+                if (devices.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No devices found...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "Active Stats",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                StatsCard("Latency", "21ms", Modifier.weight(1f))
+                StatsCard("Bitrate", "34Mbps", Modifier.weight(1f))
+                StatsCard("Packet Loss", "0%", Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun ReceiverListSection(
-    receivers: List<Receiver>,
-    selectedReceiver: Receiver?,
-    onReceiverSelected: (Receiver) -> Unit,
-    isStreaming: Boolean,
-    modifier: Modifier = Modifier
+fun MobileDashboard(
+    streamState: StreamState,
+    devices: List<Receiver>,
+    visuals: List<Float>,
+    onToggleStream: () -> Unit,
+    onConnect: (Receiver) -> Unit
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(
-            if (receivers.isEmpty()) "Searching for Devices..." else "Nearby Devices",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        
-        if (isStreaming) {
-            // Show visualizer when streaming
-            Visualizer(
-                isStreaming = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // Top Section: Hero
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(0.4f),
+            contentAlignment = Alignment.Center
+        ) {
+            HeroControl(
+                streamState = streamState,
+                onClick = onToggleStream,
+                size = 160.dp
             )
-            Spacer(Modifier.height(16.dp))
         }
         
-        // Receiver list
-        DeviceList(
-            receivers = receivers,
-            selectedReceiver = selectedReceiver,
-            onReceiverSelected = onReceiverSelected,
-            modifier = Modifier.fillMaxWidth()
+        Visualizer(
+            audioData = visuals,
+            isStreaming = streamState == StreamState.Streaming,
+            modifier = Modifier.padding(bottom = 24.dp)
         )
+
+        // Bottom Section: Devices
+        Text(
+            text = "Nearby Devices",
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(0.6f)
+        ) {
+            items(devices) { device ->
+                DeviceListItem(
+                    device = device,
+                    onClick = { onConnect(device) }
+                )
+            }
+        }
     }
 }

@@ -3,7 +3,7 @@ package com.devindeed.aurelay.desktop
 import androidx.compose.runtime.remember
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import com.aurelay.App
+import com.aurelay.ui.App
 import com.aurelay.engine.ffi.RustBridge
 import java.io.File
 

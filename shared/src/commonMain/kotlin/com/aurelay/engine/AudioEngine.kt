@@ -36,6 +36,12 @@ interface AudioEngine {
      * Audio engine logs/status messages.
      */
     val logs: StateFlow<List<String>>
+
+    /**
+     * Audio visualization data (amplitudes).
+     * Mock data or real FFT data depending on implementation.
+     */
+    val visuals: StateFlow<List<Float>>
     
     /**
      * Start streaming audio to the specified receiver.

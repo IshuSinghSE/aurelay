@@ -16,30 +16,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // ==============================================================================
-// 🎨 COLOR PALETTE (Apple-Material Hybrid)
+// 🎨 COLOR PALETTE (Cupertino Dark - Apple-Material Hybrid)
 // ==============================================================================
 
 // --- Dark Mode Colors ---
-private val DarkPrimary = Color(0xFF0A84FF)       // iOS System Blue (Active State)
-private val DarkSecondary = Color(0xFF5E5CE6)     // iOS System Indigo (Accents)
-private val DarkError = Color(0xFFFF453A)         // iOS System Red (Stop Button)
-private val DarkBackground = Color(0xFF1C1C1E)    // Apple System Gray 6 (Not pure black)
+private val DarkBackground = Color(0xFF1C1C1E)    // Apple System Gray 6
 private val DarkSurface = Color(0xFF2C2C2E)       // Apple System Gray 5 (Cards)
-private val DarkSurfaceVariant = Color(0xFF3A3A3C) // Apple System Gray 4 (Hover/Input)
-private val DarkOutline = Color(0xFF48484A)       // Apple System Gray 3 (Borders)
-private val DarkTextPrimary = Color(0xFFFFFFFF)
-private val DarkTextSecondary = Color(0xFFEBEBF5) // 60% White
+private val DarkOutlineVariant = Color(0xFF3A3A3C) // Borders (1dp outlineVariant)
+private val DarkAccent = Color(0xFFFF453A)        // Coral Orange (Hero/Active)
 
-// --- Light Mode Colors ---
-private val LightPrimary = Color(0xFF007AFF)      // iOS System Blue
-private val LightSecondary = Color(0xFF5856D6)    // iOS System Indigo
-private val LightError = Color(0xFFFF3B30)        // iOS System Red
-private val LightBackground = Color(0xFFF2F2F7)   // Apple System Grouped Background
-private val LightSurface = Color(0xFFFFFFFF)      // Pure White Cards
-private val LightSurfaceVariant = Color(0xFFE5E5EA) // Apple System Gray 5
-private val LightOutline = Color(0xFFD1D1D6)      // Apple System Gray 4
-private val LightTextPrimary = Color(0xFF000000)
-private val LightTextSecondary = Color(0xFF3C3C43) // 60% Black
+private val DarkPrimary = DarkAccent
+private val DarkSecondary = Color(0xFF0A84FF)     // iOS System Blue (Alternate)
+private val DarkError = Color(0xFFFF453A)         // Stop Button Red
+private val DarkSurfaceVariant = Color(0xFF3A3A3C) // Secondary surface
+
+// --- Light Mode Colors (Fallback/Optional) ---
+private val LightPrimary = Color(0xFF007AFF)
+private val LightSecondary = Color(0xFF5856D6)
+private val LightError = Color(0xFFFF3B30)
+private val LightBackground = Color(0xFFF2F2F7)
+private val LightSurface = Color(0xFFFFFFFF)
+private val LightSurfaceVariant = Color(0xFFE5E5EA)
+private val LightOutline = Color(0xFFD1D1D6)
 
 private val DarkColorScheme = darkColorScheme(
     primary = DarkPrimary,
@@ -58,15 +56,15 @@ private val DarkColorScheme = darkColorScheme(
     onErrorContainer = DarkError,
 
     background = DarkBackground,
-    onBackground = DarkTextPrimary,
+    onBackground = Color.White,
     surface = DarkSurface,
-    onSurface = DarkTextPrimary,
+    onSurface = Color.White,
     
     // Critical for the "Card" look
     surfaceVariant = DarkSurfaceVariant, 
-    onSurfaceVariant = DarkTextSecondary,
-    outline = DarkOutline,
-    outlineVariant = DarkSurfaceVariant
+    onSurfaceVariant = Color(0xFFEBEBF5),
+    outline = Color(0xFF48484A),
+    outlineVariant = DarkOutlineVariant // The request specified border color
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -86,18 +84,18 @@ private val LightColorScheme = lightColorScheme(
     onErrorContainer = Color(0xFF410002),
 
     background = LightBackground,
-    onBackground = LightTextPrimary,
+    onBackground = Color.Black,
     surface = LightSurface,
-    onSurface = LightTextPrimary,
+    onSurface = Color.Black,
 
     surfaceVariant = LightSurfaceVariant,
-    onSurfaceVariant = LightTextSecondary,
+    onSurfaceVariant = Color(0xFF3C3C43),
     outline = LightOutline,
     outlineVariant = Color(0xFFE5E5EA)
 )
 
 // ==============================================================================
-// 🔡 TYPOGRAPHY (San Francisco Style - Clean & Readable)
+// 🔡 TYPOGRAPHY (San Francisco Style)
 // ==============================================================================
 
 private val AurelayTypography = Typography(
@@ -105,19 +103,19 @@ private val AurelayTypography = Typography(
     headlineLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
+        fontSize = 34.sp,
         lineHeight = 40.sp,
         letterSpacing = 0.sp
     ),
-    // Section Headers (e.g., "Nearby Devices")
+    // Section Headers
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
-        lineHeight = 36.sp,
+        lineHeight = 34.sp,
         letterSpacing = 0.sp
     ),
-    // Card Titles (e.g., "Gaming PC")
+    // Card Titles
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
@@ -125,42 +123,55 @@ private val AurelayTypography = Typography(
         lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
-    // Subtitles / Lists
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 17.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.sp
+    ),
+    // Body text
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 17.sp, // Apple standard body size
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+        fontSize = 17.sp,
+        lineHeight = 22.sp,
+        letterSpacing = (-0.4).sp
     ),
-    // Secondary text / Captions
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 15.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.25.sp
+        letterSpacing = (-0.2).sp
     ),
     // Button Text
     labelLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
+        fontSize = 17.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.sp
+    ),
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.sp
     )
 )
 
 // ==============================================================================
-// 📐 SHAPES (Soft & Friendly)
+// 📐 SHAPES
 // ==============================================================================
 
 private val AurelayShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),   // Buttons / Chips
-    small = RoundedCornerShape(12.dp),       // Small Cards
-    medium = RoundedCornerShape(16.dp),      // Dialogs
-    large = RoundedCornerShape(24.dp),       // Main Cards / Bottom Sheets
-    extraLarge = RoundedCornerShape(32.dp)   // Floating Action Buttons / Hero
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(24.dp), // Requested for Cards
+    extraLarge = RoundedCornerShape(32.dp)
 )
 
 // ==============================================================================
@@ -173,13 +184,6 @@ enum class ThemeMode {
     SYSTEM
 }
 
-/**
- * Aurelay Design System
- * * Uses an "Apple-Material Hybrid" philosophy:
- * - Dark Mode: Apple System Grays (Not pure black)
- * - Light Mode: Clean White surfaces on Gray background
- * - Shapes: High corner radius (24dp) for a modern, friendly feel.
- */
 @Composable
 fun AurelayTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -193,6 +197,8 @@ fun AurelayTheme(
         ThemeMode.SYSTEM -> systemInDarkTheme
     }
 
+    // Default to dark theme if system is not specified and we want "Cupertino Dark" preference
+    // But respecting the parameter.
     val colorScheme = if (useDarkTheme) DarkColorScheme else LightColorScheme
 
     MaterialTheme(

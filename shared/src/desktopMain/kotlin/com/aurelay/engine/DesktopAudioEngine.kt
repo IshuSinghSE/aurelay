@@ -34,6 +34,8 @@ open class DesktopAudioEngine : AudioEngine {
     
     protected val _logs = MutableStateFlow<List<String>>(emptyList())
     override val logs: StateFlow<List<String>> = _logs.asStateFlow()
+
+    override val visuals: StateFlow<List<Float>> = MutableStateFlow(emptyList())
     
     init {
         addLog("Desktop AudioEngine initialized (stub - override in desktopApp)")

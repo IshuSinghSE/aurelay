@@ -3,6 +3,7 @@ package com.aurelay.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -96,7 +97,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
                     SocialIconButton(Icons.Default.Person, "Facebook")
                     SocialIconButton(Icons.Default.Email, "Instagram")
                     SocialIconButton(Icons.Default.Info, "YouTube")
-                    SocialIconButton(Icons.Default.Send, "Telegram")
+                    SocialIconButton(Icons.AutoMirrored.Filled.Send, "Telegram")
                 }
             }
         }

@@ -38,6 +38,8 @@ class AndroidAudioEngine(
     
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     override val logs: StateFlow<List<String>> = _logs.asStateFlow()
+
+    override val visuals: StateFlow<List<Float>> = MutableStateFlow(emptyList())
     
     private var discoverySocket: DatagramSocket? = null
     private var discoveryThread: Thread? = null
