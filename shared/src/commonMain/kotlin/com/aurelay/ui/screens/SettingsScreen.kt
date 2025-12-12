@@ -28,7 +28,7 @@ fun SettingsScreen(
     var autoStartService by remember { mutableStateOf(false) }
     var audioOutput by remember { mutableStateOf(true) }
     var audioNotification by remember { mutableStateOf(true) }
-    var selectedAudioConnection by remember { mutableStateOf(0) } // 0=Off, 1=Main, 2=Sysdefault, 3=Mfd
+    var selectedAudioConnection by remember { mutableIntStateOf(0) } // 0=Off, 1=Main, 2=Sysdefault, 3=Mfd
     
     Column(
         modifier = modifier

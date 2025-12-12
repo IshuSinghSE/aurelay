@@ -1,30 +1,29 @@
 package com.devindeed.aurelay
 
 //noinspection SuspiciousImport
-import android.R
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Build
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-import android.annotation.SuppressLint
 import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import java.io.IOException
-import java.net.ServerSocket
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.ServerSocket
 import java.security.KeyStore
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
@@ -147,14 +146,14 @@ class AudioRelayService : Service() {
                                 Log.e("AudioRelay", "Failed to broadcast disconnect request: ${ex.message}", ex)
                             }
                         }
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         // ignore and continue
                     }
                 }
             } catch (e: Exception) {
                 Log.e("AudioRelay", "Discovery responder failed: ${e.message}")
             } finally {
-                try { socket?.close() } catch (e: Exception) {}
+                try { socket?.close() } catch (_: Exception) {}
             }
         }
         discoveryThread?.start()

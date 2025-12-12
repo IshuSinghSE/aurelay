@@ -10,14 +10,34 @@ kotlin {
     sourceSets {
         val jvmMain by getting {
             dependencies {
-                implementation(project(":shared"))
+                implementation(project(":shared")) {
+                    // Exclude AndroidX Compose desktop artifacts that may be pulled
+                    // transitively from the Android/shared module to avoid mixing
+                    // AndroidX jvm-stubs with JetBrains Compose Desktop implementations.
+                    exclude(group = "androidx.compose.ui", module = "ui-util-desktop")
+                    exclude(group = "androidx.compose.ui", module = "ui-unit-desktop")
+                    exclude(group = "androidx.compose.ui", module = "ui-text-desktop")
+                    exclude(group = "androidx.compose.ui", module = "ui-graphics-desktop")
+                    exclude(group = "androidx.compose.ui", module = "ui-geometry-desktop")
+                    exclude(group = "androidx.compose.material", module = "material-icons-extended-desktop")
+                    exclude(group = "androidx.compose.material", module = "material-icons-core-desktop")
+                }
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
+                // Use JetBrains desktop-specific ui util/unit implementations
+                implementation("org.jetbrains.compose.ui:ui-util-desktop:1.9.3")
+                implementation("org.jetbrains.compose.ui:ui-unit-desktop:1.9.3")
+                // Provide desktop material icons (icons/core + icons/extended)
+                implementation("androidx.compose.material:material-icons-core-desktop:1.7.8")
+                implementation("androidx.compose.material:material-icons-extended-desktop:1.7.8")
                 implementation("net.java.dev.jna:jna:5.13.0")
             }
         }
     }
 }
+
+// Keep default resolution: prefer JetBrains Compose Desktop artifacts (org.jetbrains.compose)
+
 
 compose.desktop {
     application {

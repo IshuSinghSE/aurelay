@@ -43,11 +43,11 @@ jobs:
             echo "Status: Production Release -> GitHub APK + Play Store AAB"
           fi
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: 'corretto' # Fast, stable, standard
+          java-version: '21'
           cache: 'gradle' # Critical for speed
 
       - name: Verify Java and stop Gradle daemons

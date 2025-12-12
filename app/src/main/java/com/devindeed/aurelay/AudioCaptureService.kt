@@ -9,10 +9,10 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.AudioTrack
-import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -20,14 +20,15 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.IOException
-import java.io.OutputStream
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.DatagramSocket
 import java.net.DatagramPacket
-import java.util.concurrent.CopyOnWriteArrayList
+import java.net.DatagramSocket
+import java.net.Socket
 
 class AudioCaptureService : Service() {
 

@@ -1,6 +1,5 @@
 package com.aurelay.engine
 
-import com.sun.jna.Native
 import java.io.File
 
 /**

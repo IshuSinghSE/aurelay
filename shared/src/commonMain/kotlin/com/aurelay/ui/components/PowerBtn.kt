@@ -39,7 +39,7 @@ fun PowerButton(
     isStreaming: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     // Scale animation
     val scale by animateFloatAsState(

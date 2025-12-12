@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 fun Radar(
     isScanning: Boolean,
     size: Dp = 200.dp,
-    modifier: Modifier = Modifier
+    @Suppress("ModifierParameter") modifier: Modifier = Modifier
 ) {
     if (!isScanning) return
     

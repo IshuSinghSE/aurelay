@@ -1,10 +1,6 @@
 package com.aurelay.ui.screens
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,8 +29,7 @@ fun DashboardScreen(
     
     var selectedReceiver by remember { mutableStateOf<Receiver?>(null) }
     val isStreaming = streamState == StreamState.Streaming
-    val isScanning = streamState == StreamState.Idle
-    
+
     // Update selected receiver when list changes
     LaunchedEffect(discoveredReceivers) {
         if (selectedReceiver == null && discoveredReceivers.isNotEmpty()) {
@@ -65,7 +60,6 @@ fun DashboardScreen(
                 ) {
                     PowerSection(
                         isStreaming = isStreaming,
-                        streamState = streamState,
                         selectedReceiver = selectedReceiver,
                         onPowerClick = {
                             scope.launch {
@@ -112,8 +106,7 @@ fun DashboardScreen(
                 // Power button at top (when not streaming)
                 if (!isStreaming) {
                     PowerSection(
-                        isStreaming = isStreaming,
-                        streamState = streamState,
+                        isStreaming = false,
                         selectedReceiver = selectedReceiver,
                         onPowerClick = {
                             scope.launch {
@@ -160,7 +153,6 @@ fun DashboardScreen(
 @Composable
 private fun PowerSection(
     isStreaming: Boolean,
-    streamState: StreamState,
     selectedReceiver: Receiver?,
     onPowerClick: () -> Unit,
     modifier: Modifier = Modifier

@@ -1,55 +1,105 @@
 [versions]
-agp = "8.11.1"
+# --- CORE BUILD STACK (Bleeding Edge Stable) ---
+agp = "8.13.2"               # Kept your stable version (safe for now)
+jna = "5.18.1"
+kotlin = "2.2.21"            # Your requested High-Perf Kotlin
+gradle = "9.0"               # Target Gradle version
+
+# --- KMP & COMPOSE ---
+# Must match Kotlin 2.2.x.
+# If build fails, try "1.7.3" (Stable) or "1.8.0-dev"
+jetbrainsCompose = "1.9.3"
+glance = "1.1.1"
+
+# --- CORE LIBRARIES ---
+coroutines = "1.10.2"        # Updated for KMP
+serialization = "1.9.0"      # JSON parsing
+ktor = "3.1.0"               # Networking (Replacements for Retrofit in KMP if needed)
+uniffi = "0.29.0"            # RUST BRIDGE (Crucial)
+
+# --- ANDROID LEGACY (Kept from your file) ---
 appcompat = "1.7.1"
 billing = "8.2.0"
 constraintlayout = "2.2.1"
-kotlin = "2.2.21"
-coreKtx = "1.10.1"
+coreKtx = "1.17.0"
 junit = "4.13.2"
-junitVersion = "1.1.5"
-espressoCore = "3.5.1"
-lifecycleRuntimeKtx = "2.6.1"
-activityCompose = "1.8.0"
-composeBom = "2024.09.00"
+junitVersion = "1.3.0"
+espressoCore = "3.7.0"
+lifecycleRuntimeKtx = "2.10.0" # Bumped to match Compose
+activityCompose = "1.12.1"
+composeBom = "2025.12.00"
 material = "1.13.0"
 media = "1.7.0"
 mediaVersion = "1.7.1"
-playServicesAds = "24.8.0"
+playServicesAds = "24.9.0"
 preferenceKtx = "1.2.1"
-lifecycleRuntimeCompose = "2.8.7"
-kotlinxCoroutinesAndroid = "1.7.3"
-jetbrainsCompose = "1.7.1"
+
+# --- UI libraries ---
+# Align Compose UI with the JetBrains Compose runtime used for desktop
+composeUi = "1.9.3"
 
 [libraries]
+# --- KMP ESSENTIALS (New) ---
+# Coroutines
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" } # REQUIRED for Desktop UI
+
+# Serialization (JSON)
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+
+# --- JETBRAINS COMPOSE (Multiplatform) ---
+# Use these instead of androidx-compose in the SHARED module
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "jetbrainsCompose" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "jetbrainsCompose" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "jetbrainsCompose" }
+compose-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "jetbrainsCompose" }
+
+# --- ANDROID EXISTING (Kept) ---
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
-androidx-compose-animation = { module = "androidx.compose.animation:animation" }
-androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
-androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
 androidx-media-v171 = { module = "androidx.media:media", version.ref = "mediaVersion" }
 androidx-preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = "preferenceKtx" }
 billing = { module = "com.android.billingclient:billing", version.ref = "billing" }
+play-services-ads = { module = "com.google.android.gms:play-services-ads", version.ref = "playServicesAds" }
+material = { module = "com.google.android.material:material", version.ref = "material" }
+
+# Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+
+# Android Lifecycle & Compose
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
-androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleRuntimeCompose" }
-kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleRuntimeKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
-androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
-androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
-androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
-androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
-androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
-androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+# Note: In Android-only modules, keep using these. In Shared, use the JetBrains ones above.
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-material = { module = "com.google.android.material:material", version.ref = "material" }
-androidx-media = { group = "androidx.media", name = "media", version.ref = "media" }
-play-services-ads = { module = "com.google.android.gms:play-services-ads", version.ref = "playServicesAds" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest", version = "1.10.0" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation", version.ref = "composeUi" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" } # This alias was also missing but used
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version = "1.7.8" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
 
 [plugins]
+# Android
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" } # REQUIRED for :shared
+
+# Kotlin
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" } # REQUIRED for KMP
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+
+# JetBrains Compose
 jetbrains-compose = { id = "org.jetbrains.compose", version.ref = "jetbrainsCompose" }
+
+# Glance
+android-glance = { id = "androidx.glance.appwidget", version.ref = "glance" }

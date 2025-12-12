@@ -1,13 +1,13 @@
 package com.aurelay.engine
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.nsd.NsdManager
-import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +20,7 @@ import java.net.InetAddress
  * Note: This is a SENDER implementation that discovers receivers and sends audio to them.
  * It integrates with the existing AudioCaptureService (not AudioRelayService which is for receiving).
  */
+@SuppressLint("UnspecifiedRegisterReceiverFlag")
 class AndroidAudioEngine(
     private val context: Context
 ) : AudioEngine {
@@ -72,7 +73,12 @@ class AndroidAudioEngine(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(connectionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
-            context.registerReceiver(connectionReceiver, filter)
+            ContextCompat.registerReceiver(
+                context,
+                connectionReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
         }
         
         // Initialize with default device
@@ -215,7 +221,7 @@ class AndroidAudioEngine(
                                     addLog("Found receiver: $name at $address")
                                 }
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Timeout or other error, continue
                         }
                     }

@@ -3,6 +3,7 @@ package com.aurelay.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -68,7 +69,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
                     fontWeight = FontWeight.SemiBold
                 )
                 ResourceLink("All Resource", Icons.Default.Search)
-                ResourceLink("Audio Subjudges", Icons.Default.Phone)
+                ResourceLink("Audio Sub judges", Icons.Default.Phone)
                 ResourceLink("Connect with Aurelay", Icons.Default.Share)
             }
         }
@@ -95,9 +96,9 @@ fun AboutScreen(modifier: Modifier = Modifier) {
                 ) {
                     SocialIconButton(Icons.Default.Person, "Facebook")
                     SocialIconButton(Icons.Default.Email, "Instagram")
-                    SocialIconButton(Icons.Default.Info, "YouTube")
-                    SocialIconButton(Icons.Default.Send, "Telegram")
-                }
+                    SocialIconButton(Icons.Default.Phone, "Twitter")
+                    SocialIconButton(Icons.AutoMirrored.Filled.Send, "Telegram")
+                   }
             }
         }
     }

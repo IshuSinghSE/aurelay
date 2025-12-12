@@ -1,3 +1,4 @@
+
 plugins {
     alias(libs.plugins.jetbrains.compose)
     alias(libs.plugins.kotlin.compose)
@@ -25,10 +26,13 @@ kotlin {
                 implementation(compose.foundation)
                 implementation(compose.material3)
                 implementation(compose.ui)
+                implementation(compose.material)
                 implementation(compose.components.resources)
                 implementation(compose.components.uiToolingPreview)
                 implementation(libs.androidx.lifecycle.runtime.compose)
                 implementation(libs.kotlinx.coroutines.android)
+                implementation(libs.androidx.compose.material.icons.extended)
+
             }
         }
         
@@ -44,7 +48,7 @@ kotlin {
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.common)
-                implementation("net.java.dev.jna:jna:5.13.0")
+                implementation(libs.jna)
             }
         }
     }
@@ -52,7 +56,7 @@ kotlin {
 
 android {
     namespace = "com.aurelay.shared"
-    compileSdk = 35
+    compileSdk = 36
     
     defaultConfig {
         minSdk = 24
