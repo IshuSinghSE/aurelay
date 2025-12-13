@@ -76,7 +76,7 @@ private fun ScreenContent(
 ) {
     when (currentScreen) {
         is Screen.Dashboard -> DashboardScreen(audioEngine, modifier)
-        is Screen.Audio -> ConnectScreen()
+        is Screen.Audio -> AudioVisualizerScreen(audioEngine, modifier)
         is Screen.Settings -> SettingsScreen(audioEngine,modifier)
         is Screen.About -> AboutScreen(modifier)
     }

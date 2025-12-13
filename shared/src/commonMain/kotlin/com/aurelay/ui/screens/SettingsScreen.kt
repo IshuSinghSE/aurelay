@@ -1,7 +1,7 @@
 package com.devindeed.aurelay.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,337 +23,261 @@ fun SettingsScreen(
 ) {
     // State
     var autoStartService by remember { mutableStateOf(false) }
-    var audioOutputMode by remember { mutableStateOf("Audio") } // "Receive", "Audio"
-    var appTheme by remember { mutableStateOf("App") } // "App", "Default"
+    var audioOutputMode by remember { mutableStateOf("Audio") }
+    var appTheme by remember { mutableStateOf("App") }
     var dynamicColors by remember { mutableStateOf(true) }
     var showVolumeSlider by remember { mutableStateOf(true) }
     var showVisualizer by remember { mutableStateOf(true) }
     var audioVerification by remember { mutableStateOf(true) }
     var audioConnections by remember { mutableStateOf(false) }
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val isWide = maxWidth >= 900.dp
         
-        if (isWide) {
-            SettingsGrid(
-                autoStartService = autoStartService, onAutoStartChange = { autoStartService = it },
-                audioOutputMode = audioOutputMode, onAudioOutputChange = { audioOutputMode = it },
-                appTheme = appTheme, onAppThemeChange = { appTheme = it },
-                dynamicColors = dynamicColors, onDynamicColorsChange = { dynamicColors = it },
-                showVolumeSlider = showVolumeSlider, onShowVolumeSliderChange = { showVolumeSlider = it },
-                showVisualizer = showVisualizer, onShowVisualizerChange = { showVisualizer = it },
-                audioVerification = audioVerification, onAudioVerificationChange = { audioVerification = it },
-                audioConnections = audioConnections, onAudioConnectionsChange = { audioConnections = it }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(if (isWide) 32.dp else 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Settings",
+                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+                    .padding(horizontal = 8.dp)
             )
-        } else {
-            SettingsList(
-                autoStartService = autoStartService, onAutoStartChange = { autoStartService = it },
-                audioOutputMode = audioOutputMode, onAudioOutputChange = { audioOutputMode = it },
-                appTheme = appTheme, onAppThemeChange = { appTheme = it },
-                dynamicColors = dynamicColors, onDynamicColorsChange = { dynamicColors = it },
-                showVolumeSlider = showVolumeSlider, onShowVolumeSliderChange = { showVolumeSlider = it },
-                showVisualizer = showVisualizer, onShowVisualizerChange = { showVisualizer = it },
-                audioVerification = audioVerification, onAudioVerificationChange = { audioVerification = it },
-                audioConnections = audioConnections, onAudioConnectionsChange = { audioConnections = it }
-            )
-        }
-    }
-}
 
-@Composable
-fun SettingsGrid(
-    autoStartService: Boolean, onAutoStartChange: (Boolean) -> Unit,
-    audioOutputMode: String, onAudioOutputChange: (String) -> Unit,
-    appTheme: String, onAppThemeChange: (String) -> Unit,
-    dynamicColors: Boolean, onDynamicColorsChange: (Boolean) -> Unit,
-    showVolumeSlider: Boolean, onShowVolumeSliderChange: (Boolean) -> Unit,
-    showVisualizer: Boolean, onShowVisualizerChange: (Boolean) -> Unit,
-    audioVerification: Boolean, onAudioVerificationChange: (Boolean) -> Unit,
-    audioConnections: Boolean, onAudioConnectionsChange: (Boolean) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Text(
-            "Settings",
-            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 24.dp)
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            // Column 1
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                SettingsCard {
-                    SettingToggle(
-                        title = "Auto-start Service",
-                        description = "Automatically start receiver service when app launches",
-                        checked = autoStartService,
-                        onCheckedChange = onAutoStartChange
-                    )
+            if (isWide) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        GeneralSection(
+                            autoStartService, { autoStartService = it },
+                            audioOutputMode, { audioOutputMode = it },
+                            audioVerification, { audioVerification = it },
+                            audioConnections, { audioConnections = it }
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        AppearanceSection(
+                            appTheme, { appTheme = it },
+                            dynamicColors, { dynamicColors = it },
+                            showVolumeSlider, { showVolumeSlider = it },
+                            showVisualizer, { showVisualizer = it }
+                        )
+                    }
                 }
-                
-                SettingsCard {
-                    SettingSegmented(
-                        title = "Audio Output",
-                        description = "Ensure enable audio output",
-                        options = listOf("Receive", "Audio"),
-                        selectedOption = audioOutputMode,
-                        onOptionSelected = onAudioOutputChange
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                    GeneralSection(
+                        autoStartService, { autoStartService = it },
+                        audioOutputMode, { audioOutputMode = it },
+                        audioVerification, { audioVerification = it },
+                        audioConnections, { audioConnections = it }
                     )
-                }
-                
-                SettingsCard {
-                    SettingToggle(
-                        title = "Audio Verification",
-                        description = "Update certificate verification settings",
-                        checked = audioVerification,
-                        onCheckedChange = onAudioVerificationChange
-                    )
-                }
-                
-                SettingsCard {
-                    SettingToggle(
-                        title = "Audio Connections",
-                        description = "Allow audio connections from external devices",
-                        checked = audioConnections,
-                        onCheckedChange = onAudioConnectionsChange
+                    AppearanceSection(
+                        appTheme, { appTheme = it },
+                        dynamicColors, { dynamicColors = it },
+                        showVolumeSlider, { showVolumeSlider = it },
+                        showVisualizer, { showVisualizer = it }
                     )
                 }
             }
 
-            // Column 2
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                SettingsCard {
-                    SettingSegmented(
-                        title = "App Theme",
-                        description = "Set the app theme",
-                        options = listOf("App", "Default"),
-                        selectedOption = appTheme,
-                        onOptionSelected = onAppThemeChange
-                    )
-                }
-                
-                SettingsCard {
-                    SettingToggle(
-                        title = "Dynamic Colors",
-                        description = "Enable dynamic colors based on wallpaper",
-                        checked = dynamicColors,
-                        onCheckedChange = onDynamicColorsChange
-                    )
-                }
-                
-                SettingsCard {
-                    SettingToggle(
-                        title = "Show Volume Slider",
-                        description = "Show volume slider on main screen",
-                        checked = showVolumeSlider,
-                        onCheckedChange = onShowVolumeSliderChange
-                    )
-                }
-                
-                SettingsCard {
-                    SettingToggle(
-                        title = "Show Audio Visualizer",
-                        description = "Show audio visualizer animation",
-                        checked = showVisualizer,
-                        onCheckedChange = onShowVisualizerChange
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-fun SettingsList(
+private fun GeneralSection(
     autoStartService: Boolean, onAutoStartChange: (Boolean) -> Unit,
     audioOutputMode: String, onAudioOutputChange: (String) -> Unit,
-    appTheme: String, onAppThemeChange: (String) -> Unit,
-    dynamicColors: Boolean, onDynamicColorsChange: (Boolean) -> Unit,
-    showVolumeSlider: Boolean, onShowVolumeSliderChange: (Boolean) -> Unit,
-    showVisualizer: Boolean, onShowVisualizerChange: (Boolean) -> Unit,
     audioVerification: Boolean, onAudioVerificationChange: (Boolean) -> Unit,
     audioConnections: Boolean, onAudioConnectionsChange: (Boolean) -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            "Settings",
-            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 8.dp)
+    SettingsGroup(title = "General") {
+        SettingsItemToggle(
+            title = "Auto-start Service",
+            subtitle = "Start receiver when app launches",
+            checked = autoStartService,
+            onCheckedChange = onAutoStartChange
         )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        SettingsCard {
-            SettingToggle(
-                title = "Auto-start Service",
-                description = "Automatically start receiver service",
-                checked = autoStartService,
-                onCheckedChange = onAutoStartChange
-            )
-        }
+        SettingsItemSegmented(
+            title = "Audio Output",
+            options = listOf("Receive", "Audio"),
+            selected = audioOutputMode,
+            onSelected = onAudioOutputChange
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        SettingsCard {
-            SettingSegmented(
-                title = "Audio Output",
-                description = "Ensure enable audio output",
-                options = listOf("Receive", "Audio"),
-                selectedOption = audioOutputMode,
-                onOptionSelected = onAudioOutputChange
-            )
-        }
+        SettingsItemToggle(
+            title = "Audio Verification",
+            subtitle = "Verify device certificates",
+            checked = audioVerification,
+            onCheckedChange = onAudioVerificationChange
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        SettingsCard {
-            SettingSegmented(
-                title = "App Theme",
-                description = "Set the app theme",
-                options = listOf("App", "Default"),
-                selectedOption = appTheme,
-                onOptionSelected = onAppThemeChange
-            )
-        }
-
-        SettingsCard {
-            SettingToggle(
-                title = "Dynamic Colors",
-                description = "Enable dynamic colors",
-                checked = dynamicColors,
-                onCheckedChange = onDynamicColorsChange
-            )
-        }
-
-        SettingsCard {
-            SettingToggle(
-                title = "Show Volume Slider",
-                description = "Show volume slider",
-                checked = showVolumeSlider,
-                onCheckedChange = onShowVolumeSliderChange
-            )
-        }
-
-        SettingsCard {
-            SettingToggle(
-                title = "Show Audio Visualizer",
-                description = "Show audio visualizer",
-                checked = showVisualizer,
-                onCheckedChange = onShowVisualizerChange
-            )
-        }
+        SettingsItemToggle(
+            title = "External Connections",
+            subtitle = "Allow 3rd party devices",
+            checked = audioConnections,
+            onCheckedChange = onAudioConnectionsChange
+        )
     }
 }
 
 @Composable
-fun SettingsCard(content: @Composable () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Box(modifier = Modifier.padding(20.dp)) {
-            content()
-        }
+private fun AppearanceSection(
+    appTheme: String, onAppThemeChange: (String) -> Unit,
+    dynamicColors: Boolean, onDynamicColorsChange: (Boolean) -> Unit,
+    showVolumeSlider: Boolean, onShowVolumeSliderChange: (Boolean) -> Unit,
+    showVisualizer: Boolean, onShowVisualizerChange: (Boolean) -> Unit
+) {
+    SettingsGroup(title = "Appearance") {
+        SettingsItemSegmented(
+            title = "Theme",
+            options = listOf("App", "System"),
+            selected = appTheme,
+            onSelected = onAppThemeChange
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        SettingsItemToggle(
+            title = "Dynamic Colors",
+            subtitle = "Match system wallpaper",
+            checked = dynamicColors,
+            onCheckedChange = onDynamicColorsChange
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        SettingsItemToggle(
+            title = "Volume Slider",
+            subtitle = "Show on dashboard",
+            checked = showVolumeSlider,
+            onCheckedChange = onShowVolumeSliderChange
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+        SettingsItemToggle(
+            title = "Audio Visualizer",
+            subtitle = "Show animated waveform",
+            checked = showVisualizer,
+            onCheckedChange = onShowVisualizerChange
+        )
     }
 }
 
 @Composable
-fun SettingToggle(
+fun SettingsGroup(
     title: String,
-    description: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Text(
+            text = title.uppercase(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+        )
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsItemToggle(
+    title: String,
+    subtitle: String? = null,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-            )
-        )
-    }
-}
-
-@Composable
-fun SettingSegmented(
-    title: String,
-    description: String,
-    options: List<String>,
-    selectedOption: String,
-    onOptionSelected: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            if (subtitle != null) {
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = description,
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+fun SettingsItemSegmented(
+    title: String,
+    options: List<String>,
+    selected: String,
+    onSelected: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
         
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
+                .padding(2.dp)
         ) {
             options.forEach { option ->
-                val isSelected = option == selectedOption
-                OutlinedButton(
-                    onClick = { onOptionSelected(option) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(50),
-                    border = BorderStroke(
-                        1.dp, 
-                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
-                        contentColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                    )
+                val isSelected = option == selected
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent)
+                        .clickable { onSelected(option) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    Text(option)
+                    Text(
+                        text = option,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
