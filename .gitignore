@@ -77,3 +77,10 @@ coverage/fastlane/google-play-key.json
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output
+
+# rust files
+/build
+.fingerprint/
+debug/
+release/
+target/
